@@ -1,0 +1,7 @@
+# python venv 
+agent/
+.agent/
+env/
+env
+__pycache__/
+*.pyc
