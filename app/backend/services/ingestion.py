@@ -5,13 +5,12 @@ from langchain_community.document_loaders.generic import GenericLoader
 from langchain_community.document_loaders.parsers import LanguageParser
 from langchain_text_splitters import Language, RecursiveCharacterTextSplitter
 from langchain_qdrant import QdrantVectorStore
-from langchain_openai import OpenAIEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 from dotenv import load_dotenv
 
 load_dotenv()
 REPO_BASE_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "temp_repos")
 QDRANT_URL = os.getenv("QDRANT_URL")
-API_KEY = os.getenv("OPENAI_API_KEY")
 
 
 def ingest_repo(repo_url: str):
@@ -59,9 +58,14 @@ def ingest_repo(repo_url: str):
         return {"status": "error", "message": f"Failed to split documents: {str(e)}"}
 
     # embed and store
-    print(f"Saving to qdrant")
+    print(f"Creating embeddings (this may take a moment on first run)...")
     try:
-        embeddings = OpenAIEmbeddings(openai_api_key=API_KEY, model="text-embedding-3-small")
+        embeddings = HuggingFaceEmbeddings(
+            model_name="sentence-transformers/all-MiniLM-L6-v2",
+            model_kwargs={'device': 'cpu'},
+            encode_kwargs={'normalize_embeddings': True}
+        )
+        print(f"Saving to qdrant")
         QdrantVectorStore.from_documents(
             texts,
             embeddings,

@@ -1,19 +1,41 @@
 import os
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings, HuggingFacePipeline
 from langchain_qdrant import QdrantVectorStore
 from langchain.chains import create_history_aware_retriever, create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.prompts import ChatPromptTemplate
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, pipeline
 from dotenv import load_dotenv
+import torch
 
 load_dotenv()
 QDRANT_URL = os.getenv("QDRANT_URL")
-API_KEY = os.getenv("OPENAI_API_KEY")
 
 def get_chat_response(user_query: str):
     print(f"Chat service: Processing query for collection at {QDRANT_URL}")
-    llm = ChatOpenAI(model="gpt-4o", temperature=0, openai_api_key=API_KEY)
-    embeddings = OpenAIEmbeddings(openai_api_key=API_KEY, model="text-embedding-3-small")
+    
+    # init local LLM 
+    print("Loading local LLM...")
+    model_id = "google/flan-t5-base"  
+    tokenizer = AutoTokenizer.from_pretrained(model_id)
+    model = AutoModelForSeq2SeqLM.from_pretrained(model_id)
+    
+    pipe = pipeline(
+        "text2text-generation",
+        model=model,
+        tokenizer=tokenizer,
+        max_length=512,
+        do_sample=False,
+        device=-1  # Use CPU
+    )
+    
+    llm = HuggingFacePipeline(pipeline=pipe)
+    
+    embeddings = HuggingFaceEmbeddings(
+        model_name="sentence-transformers/all-MiniLM-L6-v2",
+        model_kwargs={'device': 'cpu'},
+        encode_kwargs={'normalize_embeddings': True}
+    )
 
     try:
         vector_store = QdrantVectorStore.from_existing_collection(

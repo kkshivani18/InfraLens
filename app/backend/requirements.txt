@@ -6,7 +6,10 @@ gitpython
 langchain
 langchain-community
 langchain-text-splitters
-langchain-openai
+langchain-huggingface
 langchain-qdrant
 qdrant-client
-tiktoken
+sentence-transformers
+transformers
+torch
+accelerate
