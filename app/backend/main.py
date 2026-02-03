@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
 from services.ingestion import ingest_repo
+from services.chat_service import get_chat_response
 
 app = FastAPI(title="infralens backend")
 
@@ -23,21 +24,36 @@ class IngestReq(BaseModel):
 @app.post("/api/ingest")
 async def ingest_endpoint(request: IngestReq):
     try:
+        print(f"Starting ingestion for: {request.repo_url}")
         result = ingest_repo(request.repo_url)
+        print(f"Ingestion result: {result}")
         if result["status"] == "error":
              raise HTTPException(status_code=400, detail=result["message"])
         return result
     except Exception as e:
+        print(f"Exception in ingest_endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/chat")
-async def chat_endpoint(request: ChatRequest):
-    user_message = request.message
-    print(f"Recieved from frontend: {user_message}")
+# @app.post("/api/chat")
+# async def chat_endpoint(request: ChatRequest):
+#     user_message = request.message
+#     print(f"Recieved from frontend: {user_message}")
 
-    mock_resp = f"InfraLens AI recieved: '{user_message}' (Backend is working)"
-    return {"response": mock_resp}
+#     mock_resp = f"InfraLens AI recieved: '{user_message}' (Backend is working)"
+#     return {"response": mock_resp}
 
 @app.get("health")
 async def health_check():
     return {"status": "active", "service": "InfraLens API"}
+
+@app.post("/api/chat")
+async def chat_endpoint(request: ChatRequest):
+    user_msg = request.message
+    print(f"Query: {user_msg}")
+
+    try:
+        ai_response = get_chat_response(user_msg)
+        return {"response": ai_response}
+    except Exception as e:
+        print(f"Error: {e}")
+        return {"response": "I haven't learned a codebase yet. Please ingest a repo"}

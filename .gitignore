@@ -2,6 +2,12 @@
 agent/
 .agent/
 env/
-env
+.env
+*/.env
 __pycache__/
 *.pyc
+
+# Runtime data
+qdrant_data/
+temp_repos/
+app/temp_repos/
