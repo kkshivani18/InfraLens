@@ -12,4 +12,8 @@ qdrant_data/
 temp_repos/
 app/temp_repos/
 
+context.txt
+IMPROVEMENTS.md
+RETRIEVAL_FIX.md
+SMART_RETRIEVAL_FIX.md
 logs.txt
