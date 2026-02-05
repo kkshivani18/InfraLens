@@ -4,6 +4,7 @@ from pydantic import BaseModel
 import uvicorn
 from services.ingestion import ingest_repo
 from services.chat_service import get_chat_response
+import traceback
 
 app = FastAPI(title="infralens backend")
 
@@ -14,6 +15,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.on_event("startup")
+async def startup_event():
+    print("Startup: Loading ML models...")
+    from services.chat_service import get_llm, get_embeddings
+    # Trigger model loading
+    get_embeddings()
+    get_llm()
+    print("Startup: ML models loaded and cached!")
 
 class ChatRequest(BaseModel):
     message: str
@@ -34,14 +44,6 @@ async def ingest_endpoint(request: IngestReq):
         print(f"Exception in ingest_endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# @app.post("/api/chat")
-# async def chat_endpoint(request: ChatRequest):
-#     user_message = request.message
-#     print(f"Recieved from frontend: {user_message}")
-
-#     mock_resp = f"InfraLens AI recieved: '{user_message}' (Backend is working)"
-#     return {"response": mock_resp}
-
 @app.get("health")
 async def health_check():
     return {"status": "active", "service": "InfraLens API"}
@@ -55,5 +57,6 @@ async def chat_endpoint(request: ChatRequest):
         ai_response = get_chat_response(user_msg)
         return {"response": ai_response}
     except Exception as e:
-        print(f"Error: {e}")
-        return {"response": "I haven't learned a codebase yet. Please ingest a repo"}
+        print(f"CRITICAL CHAT ERROR: {e}")
+        traceback.print_exc() 
+        return {"response": f"Error: {str(e)}"}
