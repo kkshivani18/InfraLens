@@ -1,6 +1,6 @@
 import os
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_community.llms import Ollama
+from langchain_ollama import OllamaLLM
 from langchain_qdrant import QdrantVectorStore, FastEmbedSparse, RetrievalMode
 from langchain_core.prompts import ChatPromptTemplate
 from langchain.schema.runnable import RunnablePassthrough
@@ -19,7 +19,7 @@ def get_llm():
     global llm_cache
     if llm_cache is None:
         print("Connecting to Ollama...")
-        llm_cache = Ollama(
+        llm_cache = OllamaLLM(
             model="llama3.2", 
             base_url="http://localhost:11434",
             temperature=0
@@ -107,7 +107,7 @@ def get_chat_response(user_query: str):
     relevant_docs = get_prioritized_docs(vector_store, user_query, k=5)
     print(f"Retrieved {len(relevant_docs)} documents")
     if relevant_docs:
-        for i, doc in enumerate(relevant_docs[:3]):  # Show first 3
+        for i, doc in enumerate(relevant_docs[:5]):  
             filename = doc.metadata.get('filename', doc.metadata.get('source', 'unknown'))
             preview = doc.page_content[:100].replace('\n', ' ')
             print(f"  Doc {i+1}: {filename} - {preview}...")
