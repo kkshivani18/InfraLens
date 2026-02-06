@@ -52,41 +52,34 @@ def get_prioritized_docs(vector_store, user_query: str, k: int = 6):
     if is_broad:
         print("Broad question detected - prioritizing README/Metadata")
         try:
-            # Hybrid search with a metadata filter for READMEs
-            readme_docs = vector_store.search(
-                user_query,
-                search_type="similarity",
-                k=3,
+            readme_docs = vector_store.similarity_search(
+                query="README project description overview purpose",
+                k=5,
                 filter=Filter(
                     should=[
                         FieldCondition(
                             key="metadata.filename",
                             match=MatchAny(any=[
                                 "README.md", "README.rst", "README.txt", "readme.md",
-                                "package.json", "requirements.txt", "pyproject.toml", "Cargo.toml", "main.tf"
+                                "package.json", "setup.py", "pyproject.toml", "Cargo.toml"
                             ])
                         )
                     ]
                 )
             )
-            print(f"Found {len(readme_docs)} prioritized documents")
             
-            # get other docs via standard Hybrid search
-            other_docs = vector_store.search(user_query, search_type="similarity", k=k-len(readme_docs))
-            return (readme_docs + other_docs)[:k]
-            
+            if readme_docs:
+                print(f"Found {len(readme_docs)} README/metadata documents")
+                return readme_docs[:k]
+            else:
+                print("No README found, falling back to standard search")
+                
         except Exception as e:
-            print(f"Priority search failed: {e}, falling back to standard hybrid")
-            return vector_store.search(user_query, search_type="similarity", k=k)
-    else:
-        # hybrid search
-        print("Specific question - using Hybrid Search (Vector + Keyword)")
-        return vector_store.search(
-            user_query, 
-            search_type="mmr", 
-            k=k,
-            fetch_k=20 
-        )
+            print(f"Priority search failed: {e}, falling back to standard search")
+    
+    # standard hybrid search for specific questions
+    print("Using standard similarity search")
+    return vector_store.similarity_search(user_query, k=k)
 
 def get_chat_response(user_query: str):
     print(f"Chat service: Processing query for collection at {QDRANT_URL}")
@@ -109,9 +102,9 @@ def get_chat_response(user_query: str):
         print(f"detailed error: {e}")
         raise
 
-    # Get documents with smart prioritization
+    # get documents with smart prioritization
     print(f"Retrieving context for: '{user_query}'")
-    relevant_docs = get_prioritized_docs(vector_store, user_query, k=3)
+    relevant_docs = get_prioritized_docs(vector_store, user_query, k=5)
     print(f"Retrieved {len(relevant_docs)} documents")
     if relevant_docs:
         for i, doc in enumerate(relevant_docs[:3]):  # Show first 3
@@ -120,8 +113,10 @@ def get_chat_response(user_query: str):
             print(f"  Doc {i+1}: {filename} - {preview}...")
 
     system_prompt = (
-        "You are a code analysis assistant. Answer the user's question based ONLY on the provided context.\n"
-        "Be direct and specific. If the context doesn't contain the answer, say so.\n\n"
+        "You are a helpful code analysis assistant. Answer the user's question based on the provided context.\n"
+        "If the context contains relevant information, provide a clear and specific answer.\n"
+        "If asking about what a repository is about, look for README, package.json, or setup.py content.\n"
+        "Be concise but informative.\n\n"
         "Context:\n{context}"
     )
 
@@ -130,9 +125,9 @@ def get_chat_response(user_query: str):
         ("human", "{input}"),
     ])
 
-    # Format docs for the prompt
+    # format docs for the prompt
     def format_docs(docs):
-        formatted = []
+        formatted = [] 
         for d in docs:
             content = d.page_content[:600].strip()
             filename = d.metadata.get('filename', 'unknown')
