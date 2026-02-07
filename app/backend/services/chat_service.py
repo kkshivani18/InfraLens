@@ -107,7 +107,7 @@ def get_chat_response(user_query: str):
     relevant_docs = get_prioritized_docs(vector_store, user_query, k=5)
     print(f"Retrieved {len(relevant_docs)} documents")
     if relevant_docs:
-        for i, doc in enumerate(relevant_docs[:5]):  
+        for i, doc in enumerate(relevant_docs[:5]): 
             filename = doc.metadata.get('filename', doc.metadata.get('source', 'unknown'))
             preview = doc.page_content[:100].replace('\n', ' ')
             print(f"  Doc {i+1}: {filename} - {preview}...")
