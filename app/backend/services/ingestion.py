@@ -1,23 +1,37 @@
 import os
 import shutil
 import git
+import re
+from datetime import datetime
 from langchain_community.document_loaders.generic import GenericLoader
 from langchain_community.document_loaders.parsers import LanguageParser
 from langchain_text_splitters import Language, RecursiveCharacterTextSplitter
 from langchain_qdrant import QdrantVectorStore, FastEmbedSparse, RetrievalMode
 from langchain_huggingface import HuggingFaceEmbeddings
 from dotenv import load_dotenv
+from core.database import get_database
 
 load_dotenv()
 REPO_BASE_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "temp_repos")
 QDRANT_URL = os.getenv("QDRANT_URL")
 
 
-def ingest_repo(repo_url: str):
-    print(f"--- Ingestion for {repo_url} started ---")
+def sanitize_collection_name(name: str) -> str:
+    """Sanitize collection name to be Qdrant-compatible"""
+    name = re.sub(r'[^a-zA-Z0-9_-]', '_', name)
+    if name and not name[0].isalpha() and name[0] != '_':
+        name = '_' + name
+    return name.lower()
+
+
+async def ingest_repo(repo_url: str, user_id: str):
+    print(f"--- Ingestion for {repo_url} started by user {user_id} ---")
     
     repo_name = repo_url.rstrip('/').split('/')[-1].replace('.git', '')
-    repo_path = os.path.join(REPO_BASE_PATH, repo_name)
+    sanitized_repo_name = sanitize_collection_name(repo_name)
+    collection_name = f"{user_id}_{sanitized_repo_name}"
+    
+    repo_path = os.path.join(REPO_BASE_PATH, f"{user_id}_{repo_name}")
     
     os.makedirs(REPO_BASE_PATH, exist_ok=True)
 
@@ -119,20 +133,37 @@ def ingest_repo(repo_url: str):
             embeddings,
             sparse_embedding=sparse_embeddings,
             url=QDRANT_URL,
-            collection_name="infralens_codebase",
+            collection_name=collection_name,  
             retrieval_mode=RetrievalMode.HYBRID,
             force_recreate=True  
         )
-        print("Successfully saved to Qdrant")
+        print(f"Successfully saved to Qdrant collection: {collection_name}")
     
     except Exception as e:
         print(f"Qdrant error details: {str(e)}")
         return {"status": "error", "message": f"Failed to save to Qdrant: {str(e)}"}
 
+    try:
+        db = get_database()
+        repo_doc = {
+            "user_id": user_id,
+            "github_url": repo_url,
+            "name": repo_name,
+            "collection_name": collection_name,
+            "files_processed": len(documents),
+            "chunks_stored": len(all_texts),
+            "ingested_at": datetime.utcnow()
+        }
+        await db.repositories.insert_one(repo_doc)
+        print(f"Repository metadata saved to MongoDB")
+    except Exception as e:
+        print(f"Failed to save to MongoDB: {e}")
+
     result = {
         "status": "success",
         "files_processed": len(documents),
         "chunks_stored": len(all_texts),
+        "collection_name": collection_name,
         "message": "repository indexed"
     }
     print(f"Ingestion completed: {result}")

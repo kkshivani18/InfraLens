@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_ollama import OllamaLLM
 from langchain_qdrant import QdrantVectorStore, FastEmbedSparse, RetrievalMode
@@ -7,6 +8,7 @@ from langchain.schema.runnable import RunnablePassthrough
 from langchain.schema.output_parser import StrOutputParser
 from qdrant_client.models import Filter, FieldCondition, MatchAny
 from dotenv import load_dotenv
+from core.database import get_database
 
 load_dotenv()
 QDRANT_URL = os.getenv("QDRANT_URL")
@@ -81,8 +83,52 @@ def get_prioritized_docs(vector_store, user_query: str, k: int = 6):
     print("Using standard similarity search")
     return vector_store.similarity_search(user_query, k=k)
 
-def get_chat_response(user_query: str):
-    print(f"Chat service: Processing query for collection at {QDRANT_URL}")
+async def get_user_repository(user_id: str, repo_name: str = None):
+    """Get user's repository from MongoDB to find collection name"""
+    db = get_database()
+    
+    if repo_name:
+        repo = await db.repositories.find_one({
+            "user_id": user_id,
+            "name": repo_name
+        })
+    else:
+        repo = await db.repositories.find_one(
+            {"user_id": user_id},
+            sort=[("ingested_at", -1)]
+        )
+    
+    return repo
+
+async def save_chat_to_mongodb(user_id: str, user_message: str, ai_response: str, repo_name: str = None):
+    """Save chat conversation to MongoDB"""
+    try:
+        db = get_database()
+        chat_doc = {
+            "user_id": user_id,
+            "repository_name": repo_name,
+            "messages": [
+                {"role": "user", "content": user_message, "timestamp": datetime.utcnow()},
+                {"role": "assistant", "content": ai_response, "timestamp": datetime.utcnow()}
+            ],
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow()
+        }
+        await db.chats.insert_one(chat_doc)
+        print(f"Chat saved to MongoDB for user {user_id}")
+    except Exception as e:
+        print(f"Failed to save chat to MongoDB: {e}")
+
+async def get_chat_response(user_query: str, user_id: str, repository_name: str = None):
+    print(f"Chat service: Processing query for user {user_id}")
+
+    repo = await get_user_repository(user_id, repository_name)
+    
+    if not repo:
+        return "Please ingest a repository first before asking questions."
+    
+    collection_name = repo["collection_name"]
+    print(f"Using collection: {collection_name}")
 
     # Use cached models
     llm = get_llm()
@@ -93,11 +139,11 @@ def get_chat_response(user_query: str):
         vector_store = QdrantVectorStore.from_existing_collection(
             embedding=embeddings,
             sparse_embedding=sparse_embeddings,
-            collection_name="infralens_codebase",
+            collection_name=collection_name, 
             url=QDRANT_URL,
             retrieval_mode=RetrievalMode.HYBRID
         )
-        print("Successfully connected to vector store")
+        print(f"Successfully connected to vector store: {collection_name}")
     except Exception as e:
         print(f"detailed error: {e}")
         raise
@@ -143,4 +189,7 @@ def get_chat_response(user_query: str):
     )
     
     response = chain.invoke(user_query)
+    
+    await save_chat_to_mongodb(user_id, user_query, response, repository_name)
+    
     return response
