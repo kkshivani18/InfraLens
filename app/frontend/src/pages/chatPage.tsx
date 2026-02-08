@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
+import { useAuth } from '@clerk/clerk-react';
 import { chatService } from '../services/api';
 
 const ChatPage = () => {
   const location = useLocation();
+  const { getToken } = useAuth();
   const [repoName, setRepoName] = useState<string | null>(null);
   const [messages, setMessages] = useState<{ role: string, text: string }[]>([]);
   const [input, setInput] = useState("");
@@ -27,8 +29,10 @@ const ChatPage = () => {
     setInput(""); 
 
     try {
+      const token = await getToken();
+      
       // call fastapi backend
-      const data = await chatService.sendMessage(currentInput);
+      const data = await chatService.sendMessage(currentInput, token);
 
       // add AI resp to UI
       const AImsg = { role: "ai", text: data.response}

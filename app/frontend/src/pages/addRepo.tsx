@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '@clerk/clerk-react';
 import { repoService } from '../services/api';
 
 const AddRepoPage = () => {
+  const { getToken } = useAuth();
   const [repoUrl, setRepoUrl] = useState("");
   const [loading, setLoading] = useState(false);
   const [messages, setMessages] = useState<{ role: string, text: string }[]>([]);
@@ -15,7 +17,8 @@ const AddRepoPage = () => {
     setMessages(prev => [...prev, statusMsg]);
 
     try {
-      const data = await repoService.ingestRepo(repoUrl);
+      const token = await getToken();
+      const data = await repoService.ingestRepo(repoUrl, token);
       
       const successMsg = { 
         role: "ai", 

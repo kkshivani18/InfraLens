@@ -1,4 +1,5 @@
 import { Outlet, Link, useLocation } from 'react-router-dom';
+import { UserButton } from '@clerk/clerk-react';
 
 const MainLayout = () => {
   const { pathname } = useLocation();
@@ -28,8 +29,15 @@ const MainLayout = () => {
         </nav>
       </aside>
       <main className="flex-1 flex flex-col bg-gray-900">
-        <header className="h-16 border-b border-gray-800 flex items-center px-6">
+        <header className="h-16 border-b border-gray-800 flex items-center justify-between px-6">
           <h1 className="text-xl font-semibold">InfraLens</h1>
+          <UserButton 
+            appearance={{
+              elements: {
+                avatarBox: "w-10 h-10"
+              }
+            }}
+          />
         </header>
         <div className="flex-1 overflow-hidden relative">
           <Outlet />

@@ -4,6 +4,8 @@ agent/
 env/
 .env
 */.env
+.env.local
+*/.env.local
 __pycache__/
 *.pyc
 
