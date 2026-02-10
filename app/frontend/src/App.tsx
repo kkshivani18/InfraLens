@@ -5,7 +5,8 @@ import ChatPage from './pages/chatPage';
 import AddRepo from './pages/addRepo';
 import ClonedRepos from './pages/clonedRepos';
 import SignInPage from './features/auth/pages/SignInPage';
-import SignUpPage from './features/auth/pages/SignUpPage'
+import SignUpPage from './features/auth/pages/SignUpPage';
+import LandingPage from './pages/LandingPage';
 
 function App() {
   return (
@@ -15,52 +16,34 @@ function App() {
         <Route path="/sign-in/*" element={<SignInPage />} />
         <Route path="/sign-up/*" element={<SignUpPage />} />
 
-        {/* protected route */}
-        <Route element={<MainLayout />}>
-          <Route path="/" element={
-              <>
-                <SignedIn>
-                  <Navigate to="/add" replace />
-                </SignedIn>
-                <SignedOut>
-                  <RedirectToSignIn />
-                </SignedOut>
-              </>
-            } 
-          />
-          <Route path="/chat" element={
-              <>
-                <SignedIn>
-                  <ChatPage />
-                </SignedIn>
-                <SignedOut>
-                  <RedirectToSignIn />
-                </SignedOut>
-              </>
-            } 
-          />
-          <Route path="/add" element={
-              <>
-                <SignedIn>
-                  <AddRepo />
-                </SignedIn>
-                <SignedOut>
-                  <RedirectToSignIn />
-                </SignedOut>
-              </>
-            } 
-          />
-          <Route path="/repos" element={
-              <>
-                <SignedIn>
-                  <ClonedRepos />
-                </SignedIn>
-                <SignedOut>
-                  <RedirectToSignIn />
-                </SignedOut>
-              </>
-            } 
-          />
+        {/* homepage */}
+        <Route path="/" element={
+          <>
+            <SignedIn>
+              <Navigate to="/chat" replace />
+            </SignedIn>
+            <SignedOut>
+              <LandingPage />
+            </SignedOut>
+          </>
+        } />
+
+        {/* protected app route */}
+        <Route
+          element={
+            <>
+              <SignedIn>
+                <MainLayout />
+              </SignedIn>
+              <SignedOut>
+                <RedirectToSignIn />
+              </SignedOut>
+            </>
+          }
+        >
+          <Route path="/chat" element={<ChatPage />} />
+          <Route path="/add" element={<AddRepo />} />
+          <Route path="/repos" element={<ClonedRepos />} />
         </Route>
       </Routes>
     </BrowserRouter>
