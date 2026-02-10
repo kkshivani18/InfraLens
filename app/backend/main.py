@@ -25,7 +25,8 @@ async def startup_event():
     await connect_to_mongo()
     print("Startup: Loading ML models...")
     from services.chat_service import get_llm, get_embeddings
-    # Trigger model loading
+    
+    # trigger model loading
     get_embeddings()
     get_llm()
     print("Startup: ML models loaded and cached!")

@@ -3,8 +3,7 @@ import shutil
 import git
 import re
 from datetime import datetime
-from langchain_community.document_loaders.generic import GenericLoader
-from langchain_community.document_loaders.parsers import LanguageParser
+from langchain_community.document_loaders import DirectoryLoader, TextLoader
 from langchain_text_splitters import Language, RecursiveCharacterTextSplitter
 from langchain_qdrant import QdrantVectorStore, FastEmbedSparse, RetrievalMode
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -50,13 +49,33 @@ async def ingest_repo(repo_url: str, user_id: str):
     # load code files
     print("parsing code files")
     try:
-        loader = GenericLoader.from_filesystem(
-            repo_path,
-            glob="**/[!.]*",
-            suffixes=[".py", ".ts", ".js", ".tsx", ".md", ".java", ".go", ".rs", ".c", ".cpp",  ".tf", ".yml", ".yaml"],
-            parser=LanguageParser()
-        )
-        documents = loader.load()
+        documents = []
+        supported_extensions = {".py", ".ts", ".js", ".tsx", ".jsx", ".md", ".java", ".go", ".sh", ".rs", ".c", ".cpp", ".tf", ".yml", ".yaml", ".json", ".txt", ".html", ".css", ".sql"}
+        exclude_dirs = {"node_modules", ".git", "venv", "__pycache__", "dist", "build", "target", ".next", ".vscode", ".idea"}
+        
+        for root, dirs, files in os.walk(repo_path):
+            dirs[:] = [d for d in dirs if d not in exclude_dirs]
+            
+            for file in files:
+                file_path = os.path.join(root, file)
+                ext = os.path.splitext(file)[1].lower()
+                
+                # process supported extensions
+                if ext in supported_extensions:
+                    try:
+                        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                            content = f.read()
+                            if content.strip():  
+                                from langchain.schema import Document
+                                doc = Document(
+                                    page_content=content,
+                                    metadata={"source": file_path, "filename": file}
+                                )
+                                documents.append(doc)
+                    except Exception as e:
+                        print(f"Skipping file {file}: {str(e)}")
+                        continue
+        
         print(f"loaded {len(documents)} files")
     except Exception as e:
         return {"status": "error", "message": f"Failed to parse documents: {str(e)}"}
@@ -143,6 +162,7 @@ async def ingest_repo(repo_url: str, user_id: str):
         print(f"Qdrant error details: {str(e)}")
         return {"status": "error", "message": f"Failed to save to Qdrant: {str(e)}"}
 
+    # save repo metadata to mongoDB
     try:
         db = get_database()
         repo_doc = {
@@ -158,6 +178,13 @@ async def ingest_repo(repo_url: str, user_id: str):
         print(f"Repository metadata saved to MongoDB")
     except Exception as e:
         print(f"Failed to save to MongoDB: {e}")
+    
+    print(f"cloned repository data at local cleaned")
+    try:
+        shutil.rmtree(repo_path, onerror=lambda func, path, exc: os.chmod(path, 0o777) or func(path))
+        print(f"Deleted temporary repository files")
+    except Exception as e:
+        print(f"Warning: Failed to delete temp repo: {e}")
 
     result = {
         "status": "success",

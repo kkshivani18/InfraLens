@@ -5,7 +5,7 @@ const MainLayout = () => {
   const { pathname } = useLocation();
 
   const navItems = [
-    { path: '/chat', label: 'AI Assistant', icon: '💬' },
+    { path: '/chat', label: 'AI Assistant', icon: '🤖' },
     { path: '/repos', label: 'Cloned Repositories', icon: '📂' },
     { path: '/add', label: 'Add Repository', icon: '➕' },
   ];
