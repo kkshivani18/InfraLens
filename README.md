@@ -35,6 +35,46 @@ AI-powered codebase analysis platform. Chat with your GitHub repositories using 
 - Ollama (running locally)
 - Clerk account (for auth)
 
+## Usage
+
+1. Sign up/login via Clerk
+2. Add a GitHub repository URL
+3. Wait for ingestion (indexing takes 30s-2min depending on repo size)
+4. Start chatting with your codebase
+
+## Architecture  
+
+**Ingestion Flow:**
+1. Clone repo → Parse files → Split into chunks
+2. Generate embeddings (dense + sparse)
+3. Store in Qdrant with hybrid retrieval mode
+4. Save metadata to MongoDB
+
+**Chat Flow:**
+1. User query → Retrieve relevant code chunks
+2. Smart prioritization (README for broad questions)
+3. Build context → Send to Ollama LLM
+4. Return response → Save to MongoDB
+
+## Project Structure
+
+```
+InfraLens/
+├── app/
+│   ├── backend/
+│   │   ├── core/          # Auth, database connection
+│   │   ├── models/        # Pydantic schemas
+│   │   ├── services/      # Ingestion, chat service
+│   │   └── main.py        # FastAPI app
+│   └── frontend/
+│       └── src/
+│           ├── layouts/
+│           ├── pages/     # Chat, repos, add repo
+│           └── services/  # API client
+├── docker-compose.yml
+└── qdrant_data/          # Vector DB storage
+```
+
 ## Setup
 
 ### 1. Clone and Install
@@ -96,46 +136,6 @@ VITE_CLERK_PUBLISHABLE_KEY=your_clerk_publishable_key
 Start frontend:
 ```bash
 npm run dev
-```
-
-## Usage
-
-1. Sign up/login via Clerk
-2. Add a GitHub repository URL
-3. Wait for ingestion (indexing takes 30s-2min depending on repo size)
-4. Start chatting with your codebase
-
-## Architecture  
-
-**Ingestion Flow:**
-1. Clone repo → Parse files → Split into chunks
-2. Generate embeddings (dense + sparse)
-3. Store in Qdrant with hybrid retrieval mode
-4. Save metadata to MongoDB
-
-**Chat Flow:**
-1. User query → Retrieve relevant code chunks
-2. Smart prioritization (README for broad questions)
-3. Build context → Send to Ollama LLM
-4. Return response → Save to MongoDB
-
-## Project Structure
-
-```
-InfraLens/
-├── app/
-│   ├── backend/
-│   │   ├── core/          # Auth, database connection
-│   │   ├── models/        # Pydantic schemas
-│   │   ├── services/      # Ingestion, chat service
-│   │   └── main.py        # FastAPI app
-│   └── frontend/
-│       └── src/
-│           ├── layouts/
-│           ├── pages/     # Chat, repos, add repo
-│           └── services/  # API client
-├── docker-compose.yml
-└── qdrant_data/          # Vector DB storage
 ```
 
 ## To be Implemented
