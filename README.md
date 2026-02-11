@@ -143,14 +143,14 @@ npm run dev
 - **Private repositories** - Only public GitHub repos work (OAuth integration pending)
 - **API rate limiting** - No request throttling implemented
 - **Billing integration** - No usage tracking or payment system
-- Large codebases (>5000 files) may take significant time to ingest
-- Only English language support in LLM
 
 <!-- ## Known Issues
 
 - Chat history loads but pagination not implemented (shows last 10 chats)
 - No progress indicator during repository ingestion
-- Error handling for network failures needs improvement -->
+- Error handling for network failures needs improvement 
+- Large codebases (>5000 files) may take significant time to ingest
+- Only English language support in LLM -->
 
 ## License
 
