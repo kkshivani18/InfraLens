@@ -98,7 +98,7 @@ const ClonedReposPage = () => {
 
   return (
     <div className="p-10">
-      <h2 className="text-2xl font-bold mb-6">Your Repositories</h2>
+      <h2 className="text-2xl font-bold mb-6">Your Cloned Repositories</h2>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {repos.map((repo) => (
           <div 
@@ -142,7 +142,7 @@ const ClonedReposPage = () => {
                 <Clock size={14} />
                 <span>{formatDate(repo.ingested_at)}</span>
               </div>
-              <span>•</span>
+              <span>|</span>
               <span>{repo.files_processed} files</span>
             </div>
           </div>

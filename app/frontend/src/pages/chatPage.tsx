@@ -38,7 +38,7 @@ const ChatPage = () => {
       
       if (data.messages && data.messages.length > 0) {
         const formattedMessages = data.messages.map((msg: any) => ({
-          role: msg.role === 'user' ? 'user' : 'assistant',
+          role: msg.role,
           text: msg.content
         }));
         setMessages(formattedMessages);

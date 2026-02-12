@@ -12,6 +12,22 @@ async function getAuthHeaders(token: string | null): Promise<HeadersInit> {
   return headers;
 }
 
+async function handleResponse(response: Response) {
+  if (response.status === 401) {
+    throw new Error("Unauthorized: Please sign in again");
+  }
+  
+  if (response.status === 404) {
+    throw new Error("Resource not found");
+  }
+  
+  if (!response.ok) {
+    throw new Error(`Request failed with status ${response.status}`);
+  }
+  
+  return response.json();
+}
+
 export const chatService = {
   async sendMessage(message: string, token: string | null, repositoryName?: string) {
     const response = await fetch(`${BASE_URL}/chat`, {
@@ -23,11 +39,7 @@ export const chatService = {
       }),
     });
     
-    if (response.status === 401) {
-      throw new Error("Unauthorized: Please sign in again");
-    }
-    
-    return response.json();
+    return handleResponse(response);
   },
 
   async getChatHistory(repositoryName: string, token: string | null) {
@@ -36,11 +48,7 @@ export const chatService = {
       headers: await getAuthHeaders(token),
     });
     
-    if (response.status === 401) {
-      throw new Error("Unauthorized: Please sign in again");
-    }
-    
-    return response.json();
+    return handleResponse(response);
   }
 };
 
@@ -52,11 +60,7 @@ export const repoService = {
       body: JSON.stringify({ repo_url: repoUrl }),
     });
     
-    if (response.status === 401) {
-      throw new Error("Unauthorized: Please sign in again");
-    }
-    
-    return response.json();
+    return handleResponse(response);
   },
 
   async getRepositories(token: string | null) {
@@ -65,11 +69,7 @@ export const repoService = {
       headers: await getAuthHeaders(token),
     });
     
-    if (response.status === 401) {
-      throw new Error("Unauthorized: Please sign in again");
-    }
-    
-    return response.json();
+    return handleResponse(response);
   },
   
   async deleteRepo(repoId: string, token: string | null) {
@@ -78,14 +78,6 @@ export const repoService = {
       headers: await getAuthHeaders(token),
     });
     
-    if (response.status === 401) {
-      throw new Error("Unauthorized: Please sign in again");
-    }
-    
-    if (response.status === 404) {
-      throw new Error("Repository not found");
-    }
-    
-    return response.json();
+    return handleResponse(response);
   }
 };
