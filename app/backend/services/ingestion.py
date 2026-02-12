@@ -2,13 +2,16 @@ import os
 import shutil
 import git
 import re
+import httpx
 from datetime import datetime
+from typing import Optional
 from langchain_community.document_loaders import DirectoryLoader, TextLoader
 from langchain_text_splitters import Language, RecursiveCharacterTextSplitter
 from langchain_qdrant import QdrantVectorStore, FastEmbedSparse, RetrievalMode
-from langchain_huggingface import HuggingFaceEmbeddings
 from dotenv import load_dotenv
 from core.database import get_database
+from core.embeddings import create_embeddings
+from services.user_service import get_github_token
 
 load_dotenv()
 REPO_BASE_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "temp_repos")
@@ -23,8 +26,83 @@ def sanitize_collection_name(name: str) -> str:
     return name.lower()
 
 
+def parse_github_repo(repo_url: str) -> Optional[tuple[str, str]]:
+    """Extract owner and repo name from GitHub URL"""
+    
+    # handle various gitHub URL formats
+    patterns = [
+        r'github\.com[:/]([^/]+)/([^/\.]+)', 
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, repo_url)
+        if match:
+            return match.group(1), match.group(2)
+    return None
+
+
+async def check_if_repo_is_private(repo_url: str, github_token: Optional[str] = None) -> bool:
+    """Check if a GitHub repo is private using GitHub API"""
+    parsed = parse_github_repo(repo_url)
+    if not parsed:
+        print(f"Could not parse GitHub URL: {repo_url}")
+        return False
+    
+    owner, repo = parsed
+    api_url = f"https://api.github.com/repos/{owner}/{repo}"
+    
+    headers = {"Accept": "application/vnd.github+json"}
+    if github_token:
+        headers["Authorization"] = f"Bearer {github_token}"
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(api_url, headers=headers, timeout=10.0)
+            
+            if response.status_code == 200:
+                data = response.json()
+                is_private = data.get("private", False)
+                print(f"GitHub API check: {owner}/{repo} is {'PRIVATE' if is_private else 'PUBLIC'}")
+                return is_private
+            elif response.status_code == 404:
+                print(f"Repository {owner}/{repo} returned 404 - might be private or inaccessible")
+                return True  
+            else:
+                print(f"GitHub API returned {response.status_code} for {owner}/{repo}")
+                return False
+    except Exception as e:
+        print(f"Failed to check repo privacy via API: {e}")
+        return False
+
+
+def get_authenticated_repo_url(repo_url: str, github_token: Optional[str] = None) -> str:
+    """Convert GitHub URL to authenticated format for private repos"""
+    if not github_token:
+        return repo_url
+    
+    # handle HTTPS and SSH URLs
+    if repo_url.startswith("git@github.com:"):
+        repo_url = repo_url.replace("git@github.com:", "https://github.com/")
+    
+    # add token to HTTPS URL
+    if repo_url.startswith("https://github.com/"):
+        return repo_url.replace("https://github.com/", f"https://{github_token}@github.com/")
+    
+    return repo_url
+
+
 async def ingest_repo(repo_url: str, user_id: str):
     print(f"--- Ingestion for {repo_url} started by user {user_id} ---")
+    
+    # get GitHub token for private repo access
+    github_token = await get_github_token(user_id)
+    
+    if github_token:
+        print(f"User has GitHub token - can access private repos")
+    else:
+        print(f"User has NO GitHub token - only public repos accessible")
+    
+    is_private = await check_if_repo_is_private(repo_url, github_token)
     
     repo_name = repo_url.rstrip('/').split('/')[-1].replace('.git', '')
     sanitized_repo_name = sanitize_collection_name(repo_name)
@@ -42,7 +120,35 @@ async def ingest_repo(repo_url: str, user_id: str):
 
     print(f"Cloning repo to {repo_path}")
     try:
-        git.Repo.clone_from(repo_url, repo_path)
+        authenticated_url = get_authenticated_repo_url(repo_url, github_token)
+        
+        if is_private:
+            if not github_token:
+                return {
+                    "status": "error", 
+                    "message": "This is a private repository. Please connect your GitHub account to access it."
+                }
+            print(f"Cloning PRIVATE repository with auth")
+        else:
+            print(f"Cloning PUBLIC repository")
+        
+        git.Repo.clone_from(authenticated_url, repo_path)
+        print(f" Successfully cloned {'private' if is_private else 'public'} repository")
+        
+    except git.GitCommandError as e:
+        error_msg = str(e)
+        if "Authentication failed" in error_msg or "Repository not found" in error_msg:
+            if is_private:
+                return {
+                    "status": "error", 
+                    "message": "Unable to access private repository. Please ensure your GitHub account is connected and has access to this repo."
+                }
+            else:
+                return {
+                    "status": "error", 
+                    "message": "Repository not found or inaccessible. Please check the URL."
+                }
+        return {"status": "error", "message": f"Failed to clone: {error_msg}"}
     except Exception as e:
         return {"status": "error", "message": f"Failed to clone: {str(e)}"}
     
@@ -138,11 +244,7 @@ async def ingest_repo(repo_url: str, user_id: str):
     print(f"creating embeddings")
 
     try:
-        embeddings = HuggingFaceEmbeddings(
-            model_name="sentence-transformers/all-MiniLM-L6-v2",
-            model_kwargs={'device': 'cpu'},
-            encode_kwargs={'normalize_embeddings': True}
-        )
+        embeddings = create_embeddings()
 
         sparse_embeddings = FastEmbedSparse(model_name="Qdrant/bm25")
         print(f"saving to qdrant")
@@ -170,12 +272,13 @@ async def ingest_repo(repo_url: str, user_id: str):
             "github_url": repo_url,
             "name": repo_name,
             "collection_name": collection_name,
+            "is_private": is_private,
             "files_processed": len(documents),
             "chunks_stored": len(all_texts),
             "ingested_at": datetime.utcnow()
         }
         await db.repositories.insert_one(repo_doc)
-        print(f"Repository metadata saved to MongoDB")
+        print(f" Repository metadata saved to MongoDB")
     except Exception as e:
         print(f"Failed to save to MongoDB: {e}")
     
@@ -191,7 +294,10 @@ async def ingest_repo(repo_url: str, user_id: str):
         "files_processed": len(documents),
         "chunks_stored": len(all_texts),
         "collection_name": collection_name,
-        "message": "repository indexed"
+        "is_private": is_private,
+        "message": f"{'Private' if is_private else 'Public'} repository indexed successfully"
     }
-    print(f"Ingestion completed: {result}")
+    print(f"Ingestion completed successfully")
+    print(f"Repository: {repo_name} ({'PRIVATE' if is_private else 'PUBLIC'})")
+    print(f"Files: {len(documents)}, Chunks: {len(all_texts)}")
     return result

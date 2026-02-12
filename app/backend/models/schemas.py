@@ -2,6 +2,15 @@ from pydantic import BaseModel, Field
 from typing import List, Optional
 from datetime import datetime
 
+class User(BaseModel):
+    """User document with GitHub integration"""
+    user_id: str 
+    email: Optional[str] = None
+    github_token: Optional[str] = None
+    github_username: Optional[str] = None
+    connected_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
 class Message(BaseModel):
     """single chat message"""
     role: str 
@@ -22,6 +31,7 @@ class Repository(BaseModel):
     github_url: str
     name: str  
     collection_name: str  
+    is_private: bool = False  
     files_processed: int = 0
     chunks_stored: int = 0
     ingested_at: datetime = Field(default_factory=datetime.utcnow)
@@ -34,3 +44,8 @@ class ChatRequest(BaseModel):
 class IngestRequest(BaseModel):
     """Repository ingestion API request"""
     repo_url: str
+
+class GitHubConnectRequest(BaseModel):
+    """GitHub OAuth connection request"""
+    github_token: str
+    github_username: Optional[str] = None

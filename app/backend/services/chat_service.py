@@ -1,6 +1,5 @@
 import os
 from datetime import datetime
-from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_ollama import OllamaLLM
 from langchain_qdrant import QdrantVectorStore, FastEmbedSparse, RetrievalMode
 from langchain_core.prompts import ChatPromptTemplate
@@ -9,6 +8,7 @@ from langchain.schema.output_parser import StrOutputParser
 from qdrant_client.models import Filter, FieldCondition, MatchAny
 from dotenv import load_dotenv
 from core.database import get_database
+from core.embeddings import create_embeddings
 
 load_dotenv()
 QDRANT_URL = os.getenv("QDRANT_URL")
@@ -33,11 +33,7 @@ def get_embeddings():
     global embeddings_cache
     if embeddings_cache is None:
         print("loading embeddings model")
-        embeddings_cache = HuggingFaceEmbeddings(
-            model_name="sentence-transformers/all-MiniLM-L6-v2",
-            model_kwargs={'device': 'cpu'},
-            encode_kwargs={'normalize_embeddings': True}
-        )
+        embeddings_cache = create_embeddings()
         print("embeddings cached")
     return embeddings_cache
 

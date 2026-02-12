@@ -4,9 +4,10 @@ from pydantic import BaseModel
 import uvicorn
 from services.ingestion import ingest_repo
 from services.chat_service import get_chat_response
+from services.user_service import update_github_token, get_or_create_user, get_github_token, disconnect_github
 from core.auth import get_current_user
 from core.database import connect_to_mongo, close_mongo_connection
-from models.schemas import ChatRequest, IngestRequest
+from models.schemas import ChatRequest, IngestRequest, GitHubConnectRequest
 import traceback
 
 app = FastAPI(title="infralens backend")
@@ -49,7 +50,76 @@ async def ingest_endpoint(request: IngestRequest, current_user: dict = Depends(g
         print(f"Exception in ingest_endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("health")
+@app.post("/api/github/connect")
+async def connect_github(request: GitHubConnectRequest, current_user: dict = Depends(get_current_user)):
+    """Store GitHub OAuth token for private repo access"""
+    try:
+        user_id = current_user["user_id"]
+        email = current_user.get("email")
+        
+        print(f"[GitHub Connect] Request from user: {user_id}")
+        print(f"[GitHub Connect] Token length: {len(request.github_token)}")
+        print(f"[GitHub Connect] Token starts with: {request.github_token[:8]}...")
+        
+        # user exists in DB
+        user = await get_or_create_user(user_id, email)
+        print(f"[GitHub Connect] User record: {'created' if user else 'exists'}")
+        
+        # store token
+        success = await update_github_token(
+            user_id, 
+            request.github_token, 
+            request.github_username
+        )
+        
+        print(f"[GitHub Connect] Token storage: {'success' if success else 'failed'}")
+        
+        if success:
+            print(f"GitHub token stored for user {user_id}")
+            return {
+                "status": "success", 
+                "message": "GitHub account connected successfully",
+                "github_username": request.github_username
+            }
+        else:
+            print(f"✗ Failed to store GitHub token for user {user_id}")
+            raise HTTPException(status_code=500, detail="Failed to store GitHub token")
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Exception in connect_github: {str(e)}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/github/disconnect")
+async def disconnect_github_endpoint(current_user: dict = Depends(get_current_user)):
+    try:
+        user_id = current_user["user_id"]
+        success = await disconnect_github(user_id)
+        
+        if success:
+            return {"status": "success", "message": "GitHub account disconnected"}
+        else:
+            return {"status": "info", "message": "No GitHub account was connected"}
+    except Exception as e:
+        print(f"Exception in disconnect_github: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/github/status")
+async def github_status(current_user: dict = Depends(get_current_user)):
+    try:
+        user_id = current_user["user_id"]
+        token = await get_github_token(user_id)
+        
+        return {
+            "connected": token is not None,
+            "has_token": token is not None
+        }
+    except Exception as e:
+        print(f"Exception in github_status: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/health")
 async def health_check():
     return {"status": "active", "service": "InfraLens API"}
 
