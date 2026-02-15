@@ -48,7 +48,7 @@ export const GitHubTokenSetup = () => {
         },
         body: JSON.stringify({
           github_token: tokenInput.trim(),
-          github_username: 'user' // Will be extracted from token
+          github_username: 'user' 
         })
       });
 
@@ -61,7 +61,7 @@ export const GitHubTokenSetup = () => {
         setShowTokenInput(false);
         setTokenInput('');
         alert('✅ GitHub connected! You can now access private repositories.');
-        checkStatus(); // Refresh status
+        checkStatus(); 
       } else {
         const errorText = await response.text();
         console.error('[GitHub Connect] Error response:', errorText);
