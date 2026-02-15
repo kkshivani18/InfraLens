@@ -12,6 +12,7 @@ from core.embeddings import create_embeddings
 
 load_dotenv()
 QDRANT_URL = os.getenv("QDRANT_URL")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
 
 # load models and cache them
 llm_cache = None
@@ -137,6 +138,7 @@ async def get_chat_response(user_query: str, user_id: str, repository_name: str 
             sparse_embedding=sparse_embeddings,
             collection_name=collection_name, 
             url=QDRANT_URL,
+            api_key=QDRANT_API_KEY,
             retrieval_mode=RetrievalMode.HYBRID
         )
         print(f"Successfully connected to vector store: {collection_name}")

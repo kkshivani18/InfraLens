@@ -211,7 +211,8 @@ async def delete_repository(repo_id: str, current_user: dict = Depends(get_curre
         # del from qdrant
         try:
             qdrant_url = os.getenv("QDRANT_URL", "http://localhost:6333")
-            qdrant_client = QdrantClient(url=qdrant_url)
+            qdrant_api_key = os.getenv("QDRANT_API_KEY")
+            qdrant_client = QdrantClient(url=qdrant_url, api_key=qdrant_api_key)
             qdrant_client.delete_collection(collection_name=collection_name)
             print(f"Deleted Qdrant collection: {collection_name}")
         except Exception as e:

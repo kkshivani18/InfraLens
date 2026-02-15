@@ -16,6 +16,7 @@ from services.user_service import get_github_token
 load_dotenv()
 REPO_BASE_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "temp_repos")
 QDRANT_URL = os.getenv("QDRANT_URL")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
 
 
 def sanitize_collection_name(name: str) -> str:
@@ -254,6 +255,7 @@ async def ingest_repo(repo_url: str, user_id: str):
             embeddings,
             sparse_embedding=sparse_embeddings,
             url=QDRANT_URL,
+            api_key=QDRANT_API_KEY,
             collection_name=collection_name,  
             retrieval_mode=RetrievalMode.HYBRID,
             force_recreate=True  
