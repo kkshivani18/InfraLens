@@ -13,6 +13,7 @@ qdrant-client
 sentence-transformers
 motor
 pymongo
-pyjwt
+pyjwt[crypto]
 chardet
 httpx
+cryptography

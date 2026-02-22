@@ -36,6 +36,10 @@ async def startup_event():
 async def shutdown_event():
     await close_mongo_connection()
 
+@app.get("/health")
+async def health_check():
+    return {"status": "active", "service": "InfraLens API"}
+
 @app.post("/api/ingest")
 async def ingest_endpoint(request: IngestRequest, current_user: dict = Depends(get_current_user)):
     try:
