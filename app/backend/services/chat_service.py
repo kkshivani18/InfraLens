@@ -1,6 +1,6 @@
 import os
 from datetime import datetime
-from langchain_ollama import OllamaLLM
+from langchain_groq import ChatGroq
 from langchain_qdrant import QdrantVectorStore, FastEmbedSparse, RetrievalMode
 from langchain_core.prompts import ChatPromptTemplate
 from langchain.schema.runnable import RunnablePassthrough
@@ -13,6 +13,7 @@ from core.embeddings import create_embeddings
 load_dotenv()
 QDRANT_URL = os.getenv("QDRANT_URL")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 # load models and cache them
 llm_cache = None
@@ -21,13 +22,13 @@ embeddings_cache = None
 def get_llm():
     global llm_cache
     if llm_cache is None:
-        print("Connecting to Ollama...")
-        llm_cache = OllamaLLM(
-            model="llama3.2", 
-            base_url="http://localhost:11434",
-            temperature=0
+        print("Connecting to Groq...")
+        llm_cache = ChatGroq(
+            model="llama-3.3-70b-versatile",
+            temperature=0,
+            groq_api_key=GROQ_API_KEY
         )
-        print("Ollama LLM ready")
+        print("Groq LLM ready")
     return llm_cache
 
 def get_embeddings():

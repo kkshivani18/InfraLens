@@ -14,7 +14,7 @@ from core.embeddings import create_embeddings
 from services.user_service import get_github_token
 
 load_dotenv()
-REPO_BASE_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "temp_repos")
+REPO_BASE_PATH = os.path.join(os.path.dirname(__file__), "..", "temp_repos")
 QDRANT_URL = os.getenv("QDRANT_URL")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
 

@@ -35,8 +35,13 @@ COPY --from=builder /usr/local/lib/python3.9/site-packages /usr/local/lib/python
 COPY --from=builder /usr/local/bin /usr/local/bin
 COPY . .
 
-RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+RUN useradd -m -u 1000 appuser && \
+    mkdir -p /app/temp_repos && \
+    mkdir -p /home/appuser/.cache/huggingface && \
+    chown -R appuser:appuser /app && \
+    chown -R appuser:appuser /home/appuser
 USER appuser
+ENV HF_HOME=/home/appuser/.cache/huggingface
 
 EXPOSE 8000
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

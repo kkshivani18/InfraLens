@@ -14,7 +14,12 @@ app = FastAPI(title="infralens backend")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "https://infralens-theta.vercel.app"],  
+    allow_origins=[
+        "http://localhost:5173",
+        "https://infralens-theta.vercel.app",
+        "http://infralens-load-balancer-511149642.us-east-1.elb.amazonaws.com",
+        "https://*.cloudfront.net",  
+    ],  
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
