@@ -17,9 +17,9 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:5173",
         "https://infralens-theta.vercel.app",
-        "http://infralens-load-balancer-511149642.us-east-1.elb.amazonaws.com",
-        "https://*.cloudfront.net",  
-    ],  
+        "https://infralens-n36v.onrender.com"
+    ],
+    allow_origin_regex=r"https://.*\.cloudfront\.net",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
