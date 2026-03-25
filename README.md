@@ -128,6 +128,24 @@ AI-powered codebase analysis platform. Chat with your GitHub repositories using 
 3. Remove all associated chat history
 4. Cleanup temporary files (if any)
 
+**Payment Integration Flow:**
+1. **Subscription Selection:** User selects Pro/Team plan on pricing page
+2. **API Call:** Frontend calls `/api/payments/create-subscription` with plan name
+3. **Customer Creation:** Backend creates Razorpay customer (with email) or fetches existing
+4. **Subscription Creation:** Backend creates Razorpay subscription with customer_id, plan_id, and billing config
+5. **Checkout Modal:** Frontend receives subscription ID and opens Razorpay checkout modal
+6. **Payment Entry:** User enters card details in Razorpay modal
+7. **Payment Processing:** Razorpay processes payment with configured billing cycle
+8. **Webhook Event:** Razorpay sends webhook event (`subscription.activated`, `payment.captured`, etc.) to backend
+9. **Webhook Handling:** Backend verifies signature, finds user, updates MongoDB subscription status
+10. **Success Redirect:** Frontend redirects to `/pricing/success` on payment completion
+11. **Status Persistence:** User's plan, subscription ID, and billing dates stored in MongoDB for future billing
+
+**Key Features:**
+- Subscription-based pricing: Free (₹0), Pro (₹100/month), Team (₹250/month)
+- Idempotent payment handling: Gracefully handles duplicate webhooks and customer creation retries
+- JWT-based authentication for API calls (not cookies)
+
 ## API Endpoints
 
 ### Repository Management
@@ -173,6 +191,20 @@ AI-powered codebase analysis platform. Chat with your GitHub repositories using 
   - Returns: Service status
   - Auth: Not required
 
+### Payment
+- `POST /api/payments/create-subscription` - Create a subscription checkout
+  - Body: `{ "plan": "pro" | "team" }`
+  - Returns: Razorpay subscription details with key and amount
+  - Auth: Required (Clerk)
+
+- `GET /api/payments/subscription-status` - Get current subscription status
+  - Returns: `{ "plan", "status", "current_period_end", "razorpay_subscription_id" }`
+  - Auth: Required (Clerk)
+
+- `POST /api/payments/webhook` - Razorpay webhook for payment events
+  - Webhook events: `subscription.activated`, `subscription.halted`, `subscription.cancelled`, `payment.captured`, `payment.failed`
+  - Auto-updates user subscription status in MongoDB
+
 ## Project Structure
 
 ```
@@ -188,7 +220,8 @@ InfraLens/
 │   │   ├── services/
 │   │   │   ├── ingestion.py         # Repository cloning, parsing, embedding
 │   │   │   ├── chat_service.py      # LLM integration, vector retrieval
-│   │   │   └── user_service.py      # User management, GitHub token handling
+│   │   │   ├── user_service.py      # User management, GitHub token handling
+│   │   │   └── payment_service.py   # Razorpay integration, subscriptions
 │   │   ├── main.py                  # FastAPI app with all endpoints
 │   │   └── requirements.txt         # Python dependencies
 │   └── frontend/
@@ -202,8 +235,12 @@ InfraLens/
 │           │   ├── LandingPage.tsx       # Public homepage
 │           │   ├── ChatPage.tsx          # Chat interface
 │           │   ├── AddRepo.tsx           # Repository ingestion
-│           │   └── ClonedRepos.tsx       # Repository list/management
-│           └── services/                 # API client
+│           │   ├── ClonedRepos.tsx       # Repository list/management
+│           │   ├── PricingPage.tsx       # Pricing & subscription plans
+│           │   └── PricingSuccessPage.tsx # Payment success confirmation
+│           └── services/                 # API clients
+│               ├── chatService.ts        # Chat API integration
+│               └── paymentService.ts     # Razorpay payment integration
 ├── docker-compose.yml                    # MongoDB + Qdrant setup
 └── agent/                                # Python virtual environment
 ```
@@ -213,7 +250,7 @@ InfraLens/
 ### 1. Clone and Install
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/kkshivani18/InfraLens
 cd InfraLens
 ```
 
