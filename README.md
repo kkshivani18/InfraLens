@@ -262,14 +262,7 @@ docker-compose up -d
 
 This starts MongoDB (port 27017) and Qdrant (port 6333).
 
-### 3. Install Ollama & Pull Model
-
-```bash
-# Install from https://ollama.ai
-ollama pull llama3.2
-```
-
-### 4. Backend Setup
+### 3. Backend Setup
 
 ```bash
 cd app/backend
@@ -290,7 +283,7 @@ Start backend:
 uvicorn main:app --reload --port 8000
 ```
 
-### 5. Frontend Setup
+### 4. Frontend Setup
 
 ```bash
 cd app/frontend
