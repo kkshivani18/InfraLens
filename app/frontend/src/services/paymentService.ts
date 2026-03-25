@@ -1,6 +1,5 @@
 // Payment Service - Handles all Razorpay payment operations | Communicates with backend payment endpoints
 
-import { useAuth } from '@clerk/clerk-react';
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 // to get auth token
