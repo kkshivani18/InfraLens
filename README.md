@@ -4,7 +4,7 @@ AI-powered codebase analysis platform. Chat with your GitHub repositories using 
 ## What It Does
 - Clone and analyze both **public and private** GitHub repositories with Personal Access Token integration
 - Index code using hybrid vector search (dense + sparse embeddings) with support for 15+ file types
-- Chat with your codebase using local LLM (Ollama llama3.2) with context-aware retrieval
+- Chat with your codebase using LLM (Groq) with context-aware retrieval
 - Multi-user support with secure authentication (Clerk)
 - Persistent chat history per repository with conversation retrieval
 - Full repository management (list, view metadata, delete with cleanup)
@@ -24,7 +24,7 @@ AI-powered codebase analysis platform. Chat with your GitHub repositories using 
 - **Intelligent exclusions:** Automatically skips `node_modules`, `.git`, `venv`, `__pycache__`, `dist`, `build`, `target`, `.next`, `.vscode`, `.idea`
 
 ### 🤖 Smart AI Chat
-- Local LLM (Ollama llama3.2) for privacy-first architecture
+- Cloud LLM (Groq) for fast inference and scalability
 - Hybrid vector search combining dense and sparse embeddings
 - Context-aware retrieval with smart prioritization (README, package.json for broad questions)
 - Language-aware code splitting for Python, JavaScript, TypeScript, Go, Java, Rust, Markdown, Terraform, YAML
@@ -48,7 +48,7 @@ AI-powered codebase analysis platform. Chat with your GitHub repositories using 
 **Backend**
 - FastAPI (Python 3.9+)
 - LangChain (LLM orchestration)
-- Ollama (local LLM - llama3.2)
+- Groq (Cloud LLM API)
 - Sentence Transformers (`all-MiniLM-L6-v2` for dense embeddings)
 - FastEmbed Sparse (`Qdrant/bm25` for sparse embeddings)
 - httpx (GitHub API integration)
@@ -65,7 +65,7 @@ AI-powered codebase analysis platform. Chat with your GitHub repositories using 
 - Python 3.9+
 - Node.js 18+
 - Docker & Docker Compose
-- Ollama (running locally with `llama3.2` model)
+- Groq API key (for LLM access)
 - Clerk account (for authentication)
 - GitHub Personal Access Token (optional, for private repositories)
 
@@ -112,7 +112,7 @@ AI-powered codebase analysis platform. Chat with your GitHub repositories using 
 2. **Vector Retrieval:** Hybrid search in Qdrant (dense + sparse) for relevant code chunks
 3. **Smart Prioritization:** Boost README/package.json for broad architectural questions
 4. **Context Building:** Assemble retrieved chunks with metadata
-5. **LLM Processing:** Send to Ollama llama3.2 (cached on startup for performance)
+5. **LLM Processing:** Send to Groq API with context and receive AI response
 6. **Response Delivery:** Return AI response to user
 7. **History Storage:** Save conversation to MongoDB with timestamp
 
@@ -276,6 +276,7 @@ Create `.env`:
 MONGODB_URL=mongodb://localhost:27017/<database-name>
 QDRANT_URL=http://localhost:6333
 CLERK_SECRET_KEY=your_clerk_secret_key
+GROQ_API_KEY=your_groq_api_key
 ```
 
 Start backend:
