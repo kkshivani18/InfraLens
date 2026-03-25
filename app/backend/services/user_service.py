@@ -1,7 +1,7 @@
 from datetime import datetime
 from core.database import get_database
 from typing import Optional
-
+from models.schemas import PlanType, SubscriptionStatus
 
 async def get_or_create_user(user_id: str, email: Optional[str] = None) -> dict:
     db = get_database()
@@ -16,7 +16,23 @@ async def get_or_create_user(user_id: str, email: Optional[str] = None) -> dict:
             "github_token": None,
             "github_username": None,
             "connected_at": None,
-            "created_at": datetime.utcnow()
+            "plan": {
+                "name": PlanType.FREE,
+                "price_inr": 0,
+                "status": SubscriptionStatus.INACTIVE,
+                "razorpay_customer_id": None,
+                "razorpay_subscription_id": None,
+                "razorpay_plan_id": None,
+                "current_period_start": None,
+                "current_period_end": None,
+                "last_payment_id": None,
+                "last_payment_date": None,
+                "last_payment_status": None,
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow(),
+            },
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow(),
         }
         await users_collection.insert_one(new_user)
         return new_user

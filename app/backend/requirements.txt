@@ -18,3 +18,4 @@ chardet
 httpx
 cryptography
 fastembed
+razorpay

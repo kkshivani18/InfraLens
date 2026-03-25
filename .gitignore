@@ -29,3 +29,16 @@ infra/.terraform/providers/registry.terraform.io/hashicorp/random/3.8.1/windows_
 infra/.terraform.lock.hcl
 infra/*.tfstate
 infra/*.tfstate.*
+
+
+# .md files
+/docs to refer/
+COMPLETE_SETUP_SUMMARY.md
+FILE_STRUCTURE_GUIDE.md
+PAYMENT_INTEGRATION_SUMMARY.md
+PAYMENT_SETUP.md
+QUICK_REFERENCE.md
+TECHNICAL_DEEP_DIVE.md
+TESTING_GUIDE.md
+
+test_razorpay.py

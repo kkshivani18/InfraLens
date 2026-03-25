@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
@@ -7,8 +7,11 @@ from services.chat_service import get_chat_response
 from services.user_service import update_github_token, get_or_create_user, get_github_token, disconnect_github
 from core.auth import get_current_user
 from core.database import connect_to_mongo, close_mongo_connection
-from models.schemas import ChatRequest, IngestRequest, GitHubConnectRequest
+from models.schemas import ChatRequest, IngestRequest, GitHubConnectRequest, CreateSubscriptionRequest, CreateSubscriptionResponse, SubscriptionStatusResponse, ShareChatRequest
+from services.payment_service import payment_service
+from services.entitlement_service import entitlement_checker
 import traceback
+import json
 
 app = FastAPI(title="infralens backend")
 
@@ -52,6 +55,7 @@ async def ingest_endpoint(request: IngestRequest, current_user: dict = Depends(g
         print(f"Starting ingestion for: {request.repo_url} by user: {user_id}")
         result = await ingest_repo(request.repo_url, user_id)
         print(f"Ingestion result: {result}")
+        
         if result["status"] == "error":
              raise HTTPException(status_code=400, detail=result["message"])
         return result
@@ -66,9 +70,9 @@ async def connect_github(request: GitHubConnectRequest, current_user: dict = Dep
         user_id = current_user["user_id"]
         email = current_user.get("email")
         
-        print(f"[GitHub Connect] Request from user: {user_id}")
-        print(f"[GitHub Connect] Token length: {len(request.github_token)}")
-        print(f"[GitHub Connect] Token starts with: {request.github_token[:8]}...")
+        print(f"[GitHub] Request from user: {user_id}")
+        print(f"[GitHub] Token length: {len(request.github_token)}")
+        print(f"[GitHub] Token starts with: {request.github_token[:8]}...")
         
         # user exists in DB
         user = await get_or_create_user(user_id, email)
@@ -80,7 +84,6 @@ async def connect_github(request: GitHubConnectRequest, current_user: dict = Dep
             request.github_token, 
             request.github_username
         )
-        
         print(f"[GitHub Connect] Token storage: {'success' if success else 'failed'}")
         
         if success:
@@ -136,7 +139,6 @@ async def health_check():
 async def chat_endpoint(request: ChatRequest, current_user: dict = Depends(get_current_user)):
     user_msg = request.message
     user_id = current_user["user_id"]
-    print(f"Query from user {user_id}: {user_msg}")
 
     try:
         ai_response = await get_chat_response(user_msg, user_id, request.repository_name)
@@ -246,4 +248,98 @@ async def delete_repository(repo_id: str, current_user: dict = Depends(get_curre
         raise
     except Exception as e:
         print(f"Exception in delete_repository: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Payment endpoints -----------------------------------------------------------------
+
+@app.post("/api/payments/create-subscription")
+async def create_subscription(
+    request: CreateSubscriptionRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Start subscription checkout for user."""
+    try:
+        user_id = current_user["user_id"]
+        # Use email from Clerk, or fallback to generated email if None
+        email = current_user.get("email") or f"{user_id}@gmail.com"
+        
+        checkout_data, error = await payment_service.create_subscription(
+            user_id, email, request.plan
+        )
+        
+        if error:
+            raise HTTPException(status_code=400, detail=error)
+        
+        return CreateSubscriptionResponse(**checkout_data)
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Exception in create_subscription: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/payments/subscription-status")
+async def get_subscription_status(
+    current_user: dict = Depends(get_current_user),
+):
+    """Get current subscription status for authenticated user."""
+    try:
+        user_id = current_user["user_id"]
+        status = await payment_service.get_user_subscription(user_id)
+        return status
+    except Exception as e:
+        print(f"Exception in get_subscription_status: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/payments/webhook")
+async def razorpay_webhook(
+    request: dict,
+    x_razorpay_signature: str = Header(None),
+):
+    """
+    Public webhook endpoint for Razorpay events.
+    Verify signature, then process subscription/payment events.
+    """
+    try:
+        body_str = json.dumps(request)
+        
+        # verify webhook signature
+        if not payment_service.verify_webhook_signature(body_str, x_razorpay_signature):
+            raise HTTPException(status_code=403, detail="Invalid signature")
+        
+        # Process the event
+        success, message = await payment_service.process_webhook_event(request)
+        
+        if success:
+            return {"status": "success", "message": message}
+        else:
+            return {"status": "warning", "message": message}
+    
+    except ValueError as e:
+        return {"status": "error", "message": str(e)}
+    except Exception as e:
+        # Always return 200 to avoid Razorpay retries
+        return {"status": "error", "message": str(e)}
+
+@app.post("/api/chat/share")
+async def share_chat(
+    request: ShareChatRequest,  # { repository_name, chat_session_id, share_with_emails }
+    current_user: dict = Depends(get_current_user),
+):
+    """Share a chat session with other users (PREMIUM feature)."""
+    try:
+        user_id = current_user["user_id"]
+        
+        # CHECK ENTITLEMENT
+        allowed, reason = await entitlement_checker.can_access_feature(user_id, "can_share_chat")
+        if not allowed:
+            raise HTTPException(status_code=402, detail=reason)  # 402 Payment Required
+        
+        # Proceed with share logic
+        # ... store share record in MongoDB ...
+        return {"status": "success", "message": "Chat shared"}
+    
+    except HTTPException:
+        raise
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

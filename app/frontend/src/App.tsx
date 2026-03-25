@@ -7,6 +7,8 @@ import ClonedRepos from './pages/clonedRepos';
 import SignInPage from './features/auth/pages/SignInPage';
 import SignUpPage from './features/auth/pages/SignUpPage';
 import LandingPage from './pages/LandingPage';
+import { PricingPage } from './pages/PricingPage';
+import { PricingSuccessPage } from './pages/PricingSuccessPage';
 
 function App() {
   return (
@@ -15,6 +17,7 @@ function App() {
         {/* public route */}
         <Route path="/sign-in/*" element={<SignInPage />} />
         <Route path="/sign-up/*" element={<SignUpPage />} />
+        <Route path="/pricing" element={<PricingPage />} />
 
         {/* homepage */}
         <Route path="/" element={
@@ -44,6 +47,7 @@ function App() {
           <Route path="/chat" element={<ChatPage />} />
           <Route path="/add" element={<AddRepo />} />
           <Route path="/repos" element={<ClonedRepos />} />
+          <Route path="/pricing/success" element={<PricingSuccessPage />} />
         </Route>
       </Routes>
     </BrowserRouter>
