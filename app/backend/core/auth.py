@@ -32,6 +32,19 @@ def get_jwks_client() -> PyJWKClient:
             )
     return jwks_client
 
+def get_org_context(decoded_jwt: dict) -> dict:
+    """
+    Extract org context from Clerk JWT claims.
+    Clerk populates org_id and org_role if user is in an organization.
+    """
+    org_id = decoded_jwt.get("org_id")  
+    org_role = decoded_jwt.get("org_role") 
+    
+    return {
+        "org_id": org_id,
+        "org_role": org_role
+    }
+
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> Dict[str, str]:
     token = credentials.credentials
     
@@ -56,9 +69,14 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
                 detail="Invalid token: user_id not found"
             )
         
+        # extract org context from JWT
+        org_context = get_org_context(decoded)
+        
         return {
             "user_id": user_id,
-            "email": email or None
+            "email": email or None,
+            "org_id": org_context.get("org_id"),
+            "org_role": org_context.get("org_role")
         }
     
     except jwt.ExpiredSignatureError:

@@ -37,6 +37,23 @@ class SubscriptionPlan(BaseModel):
 
 # CORE MODELS --------------------------------------
 
+class Organization(BaseModel):
+    """Organization document for Team plan multi-tenancy"""
+    org_id: str  
+    name: str  # org name
+    owner_user_id: str  
+    plan: SubscriptionPlan = Field(default_factory=lambda: SubscriptionPlan(
+        name=PlanType.TEAM,
+        price_inr=0,
+        status=SubscriptionStatus.INACTIVE
+    ))
+    member_user_ids: List[str] = []  # list of user_ids in this org
+    ingestion_quota_monthly: int = 100  
+    ingestion_count_this_month: int = 0  # current usage
+    quota_reset_date: Optional[datetime] = None  # when quota resets
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
 class User(BaseModel):
     """User document with GitHub integration"""
     user_id: str 
@@ -44,6 +61,7 @@ class User(BaseModel):
     github_token: Optional[str] = None
     github_username: Optional[str] = None
     connected_at: Optional[datetime] = None
+    org_id: Optional[str] = None  
 
     plan: SubscriptionPlan = Field(default_factory=lambda: SubscriptionPlan(
         name=PlanType.FREE,
@@ -60,16 +78,18 @@ class Message(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 class Chat(BaseModel):
-    """Chat conversation document"""
-    user_id: str
+    """Chat conversation document (scoped to individual user)"""
+    user_id: str  # individual user
+    org_id: Optional[str] = None  # org's repo 
     repository_name: Optional[str] = None 
     messages: List[Message] = []
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 class Repository(BaseModel):
-    """Repository document"""
-    user_id: str
+    """Repository document - supports both single-user (user_id) and team (org_id) models"""
+    user_id: Optional[str] = None  # single-user or org member ingesting to personal repo
+    org_id: Optional[str] = None  # ingested to team workspace
     github_url: str
     name: str  
     collection_name: str  
@@ -139,3 +159,33 @@ class WebhookPayload(BaseModel):
     """Razorpay webhook structure (simplified)"""
     event: str  # e.g. "subscription.activated"
     payload: dict
+
+# ORG MANAGEMENT SCHEMAS ------------------------------------------
+
+class InviteRequest(BaseModel):
+    """Invite a member to an organization"""
+    email: str
+
+class InviteResponse(BaseModel):
+    """Response after sending invite"""
+    status: str  # "success"
+    message: str
+    invited_email: str
+    org_id: str
+
+class OrgDetailsResponse(BaseModel):
+    """Organization details with membership and quota info"""
+    org_id: str
+    name: str
+    owner_user_id: str
+    plan: PlanType
+    member_count: int
+    seats_max: int
+    ingestion_quota_monthly: int
+    repos_ingested_this_month: int
+    created_at: datetime
+
+class IngestRequestWithOrg(BaseModel):
+    """Ingest request with optional org_id for team workspace"""
+    repo_url: str
+    org_id: Optional[str] = None  

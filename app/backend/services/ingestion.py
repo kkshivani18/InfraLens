@@ -27,6 +27,25 @@ def sanitize_collection_name(name: str) -> str:
     return name.lower()
 
 
+def get_collection_name(owner_type: str, owner_id: str, repo_name: str) -> str:
+    """
+    Generate Qdrant collection name with tenant isolation.
+    
+    Encoding owner_type ensures complete vector isolation between single-user and org repos.
+    A bug in retrieval code can never leak chunks from one tenant to another.
+    
+    Returns:
+        Qdrant-compatible collection name: "usr_<owner_id>_<repo>"
+    """
+    if owner_type not in ["org", "usr"]:
+        raise ValueError(f"owner_type must be 'org' or 'usr', got: {owner_type}")
+    
+    safe_owner_id = sanitize_collection_name(owner_id)
+    safe_repo_name = sanitize_collection_name(repo_name)
+    
+    return f"{owner_type}_{safe_owner_id}_{safe_repo_name}"
+
+
 def parse_github_repo(repo_url: str) -> Optional[tuple[str, str]]:
     """Extract owner and repo name from GitHub URL"""
     
@@ -92,8 +111,24 @@ def get_authenticated_repo_url(repo_url: str, github_token: Optional[str] = None
     return repo_url
 
 
-async def ingest_repo(repo_url: str, user_id: str):
-    print(f"--- Ingestion for {repo_url} started by user {user_id} ---")
+async def ingest_repo(repo_url: str, user_id: str, org_id: Optional[str] = None):
+    """
+    Ingest repository to Qdrant.
+    
+    Args:
+        repo_url: GitHub repository URL
+        user_id: Clerk user_id performing the ingest
+        org_id: Organization ID (ingesting to team workspace)
+    """
+    
+    if org_id:
+        owner_type = "org"
+        owner_id = org_id
+        print(f"--- Ingestion for {repo_url} to ORG {org_id} by user {user_id} ---")
+    else:
+        owner_type = "usr"
+        owner_id = user_id
+        print(f"--- Ingestion for {repo_url} to USER workspace {user_id} ---")
     
     # get GitHub token for private repo access
     github_token = await get_github_token(user_id)
@@ -106,10 +141,9 @@ async def ingest_repo(repo_url: str, user_id: str):
     is_private = await check_if_repo_is_private(repo_url, github_token)
     
     repo_name = repo_url.rstrip('/').split('/')[-1].replace('.git', '')
-    sanitized_repo_name = sanitize_collection_name(repo_name)
-    collection_name = f"{user_id}_{sanitized_repo_name}"
+    collection_name = get_collection_name(owner_type, owner_id, repo_name)
     
-    repo_path = os.path.join(REPO_BASE_PATH, f"{user_id}_{repo_name}")
+    repo_path = os.path.join(REPO_BASE_PATH, f"{owner_type}_{owner_id}_{repo_name}")
     
     os.makedirs(REPO_BASE_PATH, exist_ok=True)
 
@@ -270,7 +304,8 @@ async def ingest_repo(repo_url: str, user_id: str):
     try:
         db = get_database()
         repo_doc = {
-            "user_id": user_id,
+            "user_id": user_id if not org_id else None, 
+            "org_id": org_id,  
             "github_url": repo_url,
             "name": repo_name,
             "collection_name": collection_name,
@@ -301,5 +336,6 @@ async def ingest_repo(repo_url: str, user_id: str):
     }
     print(f"Ingestion completed successfully")
     print(f"Repository: {repo_name} ({'PRIVATE' if is_private else 'PUBLIC'})")
+    print(f"Tenant: {owner_type}({owner_id}) -> Collection: {collection_name}")
     print(f"Files: {len(documents)}, Chunks: {len(all_texts)}")
     return result

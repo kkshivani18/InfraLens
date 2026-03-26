@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
-from services.ingestion import ingest_repo
+from services.ingestion import ingest_repo, get_collection_name
 from services.chat_service import get_chat_response
 from services.user_service import update_github_token, get_or_create_user, get_github_token, disconnect_github
 from core.auth import get_current_user
@@ -10,6 +10,8 @@ from core.database import connect_to_mongo, close_mongo_connection
 from models.schemas import ChatRequest, IngestRequest, GitHubConnectRequest, CreateSubscriptionRequest, CreateSubscriptionResponse, SubscriptionStatusResponse, ShareChatRequest
 from services.payment_service import payment_service
 from services.entitlement_service import entitlement_checker
+from services.org_service import require_org_access
+from bson import ObjectId
 import traceback
 import json
 
@@ -51,14 +53,52 @@ async def health_check():
 @app.post("/api/ingest")
 async def ingest_endpoint(request: IngestRequest, current_user: dict = Depends(get_current_user)):
     try:
+        from core.database import get_database
+        from datetime import datetime
+        
+        db = get_database()
         user_id = current_user["user_id"]
-        print(f"Starting ingestion for: {request.repo_url} by user: {user_id}")
-        result = await ingest_repo(request.repo_url, user_id)
+        org_id = current_user.get("org_id")  # from Clerk JWT
+        
+        print(f"Starting ingestion for: {request.repo_url} by user: {user_id}, org: {org_id}")
+        
+        # If ingesting to org, validate user is org member
+        if org_id:
+            org = await db.organizations.find_one({"org_id": org_id})
+            if not org or user_id not in org.get("member_user_ids", []):
+                raise HTTPException(status_code=403, detail="You are not a member of this organization")
+            
+            # Check org quota before ingestion
+            month_key = datetime.utcnow().strftime("%Y-%m")
+            usage = await db.usage.find_one({"org_id": org_id, "month": month_key})
+            
+            if usage and usage.get("repos_ingested", 0) >= org.get("ingestion_quota_monthly", 100):
+                raise HTTPException(
+                    status_code=402,
+                    detail=f"Organization quota reached ({org.get('ingestion_quota_monthly', 100)} repos/month). Upgrade to ingest more."
+                )
+        
+        result = await ingest_repo(request.repo_url, user_id, org_id=org_id)
         print(f"Ingestion result: {result}")
         
         if result["status"] == "error":
              raise HTTPException(status_code=400, detail=result["message"])
+        
+        # increment org quota after successful ingest
+        if org_id:
+            month_key = datetime.utcnow().strftime("%Y-%m")
+            await db.usage.update_one(
+                {"org_id": org_id, "month": month_key},
+                {
+                    "$inc": {"repos_ingested": 1},
+                    "$set": {"org_id": org_id, "month": month_key, "updated_at": datetime.utcnow()}
+                },
+                upsert=True
+            )
+        
         return result
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Exception in ingest_endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -139,44 +179,127 @@ async def health_check():
 async def chat_endpoint(request: ChatRequest, current_user: dict = Depends(get_current_user)):
     user_msg = request.message
     user_id = current_user["user_id"]
+    org_id = current_user.get("org_id")
 
     try:
+        from core.database import get_database
+        db = get_database()
+        
+        # validate access to repository
+        repo = await db.repositories.find_one({"name": request.repository_name})
+        if not repo:
+            raise HTTPException(status_code=404, detail="Repository not found")
+        
+        # workspace isolation
+        repo_user_id = repo.get("user_id")
+        repo_org_id = repo.get("org_id")
+        
+        # personal repo
+        if repo_org_id is None and repo_user_id:
+            if repo_user_id != user_id:
+                raise HTTPException(status_code=403, detail="You do not have access to this repository")
+        
+        # org repo
+        if repo_org_id:
+            if org_id != repo_org_id:
+                raise HTTPException(status_code=403, detail="You do not have access to this organization's repository")
+            
+            org = await db.organizations.find_one({"org_id": org_id})
+            if not org or user_id not in org.get("member_user_ids", []):
+                raise HTTPException(status_code=403, detail="You are not a member of this organization")
+        
         ai_response = await get_chat_response(user_msg, user_id, request.repository_name)
         return {"response": ai_response}
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Exception in chat_endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/repositories")
-async def get_repositories(current_user: dict = Depends(get_current_user)):
-    """Get all repositories for the user"""
+async def get_repositories(workspace_type: str = "personal", current_user: dict = Depends(get_current_user)):
+    """Get repositories for current workspace (strict isolation).
+    
+    Args:
+        workspace_type: "personal" or "org" (default: "personal")
+    """
     try:
         from core.database import get_database
         db = get_database()
         user_id = current_user["user_id"]
+        org_id = current_user.get("org_id")
         
-        repositories = await db.repositories.find(
-            {"user_id": user_id}
-        ).sort("ingested_at", -1).to_list(length=100)
+        repositories = []
         
+        # personal workspace
+        if workspace_type == "personal":
+            repositories = await db.repositories.find(
+                {"user_id": user_id, "org_id": None}
+            ).sort("ingested_at", -1).to_list(length=100)
+        
+        # Org workspace 
+        elif workspace_type == "org":
+            if not org_id:
+                raise HTTPException(status_code=400, detail="No organization selected")
+            
+            # Validate user is org member
+            org = await db.organizations.find_one({"org_id": org_id})
+            if not org or user_id not in org.get("member_user_ids", []):
+                raise HTTPException(status_code=403, detail="You are not a member of this organization")
+            
+            # Return ONLY org repos, never personal repos
+            repositories = await db.repositories.find(
+                {"org_id": org_id}
+            ).sort("ingested_at", -1).to_list(length=100)
+        
+        else:
+            raise HTTPException(status_code=400, detail="Invalid workspace_type. Use 'personal' or 'org'")
+        
+        # Format response
         for repo in repositories:
             repo["_id"] = str(repo["_id"])
             repo["ingested_at"] = repo["ingested_at"].isoformat()
         
         return {"repositories": repositories}
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Exception in get_repositories: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/chat/history/{repository_name}")
 async def get_chat_history(repository_name: str, current_user: dict = Depends(get_current_user)):
-    """Get chat history for a specific repository"""
+    """Get chat history for a specific repository with workspace isolation"""
     try:
         from core.database import get_database
         db = get_database()
         user_id = current_user["user_id"]
+        org_id = current_user.get("org_id")
         
-        # get all chats of user with that repository
+        # validate access to repo
+        repo = await db.repositories.find_one({"name": repository_name})
+        if not repo:
+            raise HTTPException(status_code=404, detail="Repository not found")
+        
+        # workspace isolation
+        repo_user_id = repo.get("user_id")
+        repo_org_id = repo.get("org_id")
+        
+        # personal repo
+        if repo_org_id is None and repo_user_id:
+            if repo_user_id != user_id:
+                raise HTTPException(status_code=403, detail="You do not have access to this repository")
+        
+        # Org repo
+        if repo_org_id:
+            if org_id != repo_org_id:
+                raise HTTPException(status_code=403, detail="You do not have access to this organization's repository")
+            
+            org = await db.organizations.find_one({"org_id": org_id})
+            if not org or user_id not in org.get("member_user_ids", []):
+                raise HTTPException(status_code=403, detail="You are not a member of this organization")
+        
+        # Get chat history scoped to user + repository
         chats = await db.chats.find({
             "user_id": user_id,
             "repository_name": repository_name
@@ -193,8 +316,59 @@ async def get_chat_history(repository_name: str, current_user: dict = Depends(ge
                 })
         
         return {"messages": all_messages}
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Exception in get_chat_history: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/chat/shared-with-me")
+async def get_shared_chats(current_user: dict = Depends(get_current_user)):
+    """Get list of chats shared with the current user"""
+    try:
+        from core.database import get_database
+        
+        db = get_database()
+        user_email = current_user.get("email")
+        
+        if not user_email:
+            return {"shared_chats": []}
+        
+        # all chats shared with this user's email
+        shared_chats = await db.chat_shares.find(
+            {"shared_with_email": user_email}
+        ).sort("created_at", -1).to_list(length=50)
+        
+        # enrich with actual chat messages
+        enriched_chats = []
+        for share in shared_chats:
+            chat = await db.chats.find_one({
+                "_id": ObjectId(share["chat_session_id"]) if share["chat_session_id"].startswith("ObjectId") else share["chat_session_id"],
+                "repository_name": share["repository_name"]
+            })
+            
+            if chat:
+                messages = []
+                for msg in chat.get("messages", []):
+                    messages.append({
+                        "role": msg["role"],
+                        "content": msg["content"],
+                        "timestamp": msg["timestamp"].isoformat() if "timestamp" in msg else None
+                    })
+                
+                enriched_chats.append({
+                    "chat_session_id": share["chat_session_id"],
+                    "repository_name": share["repository_name"],
+                    "shared_by_user_id": share["shared_by_user_id"],
+                    "shared_at": share["created_at"].isoformat(),
+                    "access_level": share["access_level"],
+                    "messages": messages
+                })
+        
+        return {"shared_chats": enriched_chats}
+    
+    except Exception as e:
+        print(f"Exception in get_shared_chats: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/api/repositories/{repo_id}")
@@ -326,20 +500,62 @@ async def share_chat(
     request: ShareChatRequest,  # { repository_name, chat_session_id, share_with_emails }
     current_user: dict = Depends(get_current_user),
 ):
-    """Share a chat session with other users (PREMIUM feature)."""
+    """Share a chat session with team members (workspace sharing)."""
     try:
+        from core.database import get_database
+        from datetime import datetime
+        
+        db = get_database()
         user_id = current_user["user_id"]
+        org_id = current_user.get("org_id")
         
-        # CHECK ENTITLEMENT
-        allowed, reason = await entitlement_checker.can_access_feature(user_id, "can_share_chat")
-        if not allowed:
-            raise HTTPException(status_code=402, detail=reason)  # 402 Payment Required
+        # org members can share chats
+        if not org_id:
+            raise HTTPException(
+                status_code=403,
+                detail="Chat sharing is only available in Team workspaces"
+            )
         
-        # Proceed with share logic
-        # ... store share record in MongoDB ...
-        return {"status": "success", "message": "Chat shared"}
+        # Validate org exists and user is member
+        org = await db.organizations.find_one({"org_id": org_id})
+        if not org or user_id not in org.get("member_user_ids", []):
+            raise HTTPException(status_code=403, detail="You are not a member of this organization")
+        
+        # Validate repository exists and belongs to this org
+        repo = await db.repositories.find_one(
+            {"name": request.repository_name, "org_id": org_id}
+        )
+        if not repo:
+            raise HTTPException(status_code=404, detail="Repository not found in this workspace")
+        
+        # Store share records for each recipient
+        share_records = []
+        for email in request.share_with_emails or []:
+            share_record = {
+                "chat_session_id": request.chat_session_id,
+                "repository_name": request.repository_name,
+                "org_id": org_id,
+                "shared_by_user_id": user_id,
+                "shared_with_email": email,
+                "created_at": datetime.utcnow(),
+                "access_level": "view"  # read-only access
+            }
+            share_records.append(share_record)
+        
+        if share_records:
+            result = await db.chat_shares.insert_many(share_records)
+            shared_count = len(result.inserted_ids)
+        else:
+            shared_count = 0
+        
+        return {
+            "status": "success",
+            "message": f"Chat shared with {shared_count} team member(s)",
+            "shared_count": shared_count
+        }
     
     except HTTPException:
         raise
     except Exception as e:
+        print(f"Exception in share_chat: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
