@@ -20,16 +20,14 @@ const ChatPage = () => {
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [chatSessionId, setChatSessionId] = useState<string>(Math.random().toString(36).substring(7));
 
-  // init from Clerk org context on mount
   useEffect(() => {
-    if (organization?.id) {
-      setActiveOrgId(organization.id);
-      localStorage.setItem('activeOrgId', organization.id);
+    const savedOrgId = localStorage.getItem('activeOrgId');
+    if (savedOrgId && savedOrgId !== 'personal') {
+      setActiveOrgId(savedOrgId);
     } else {
       setActiveOrgId(null);
-      localStorage.setItem('activeOrgId', 'personal');
     }
-  }, [organization]);
+  }, []);
 
   useEffect(() => {
     if (location.state?.repoName) {

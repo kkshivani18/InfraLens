@@ -11,45 +11,61 @@ export const OrgSwitcher = ({ onOrgChange, className = "" }: OrgSwitcherProps) =
   const { userMemberships } = useOrganizationList({ userMemberships: true });
   const { setActive } = useClerk();
   const [isOpen, setIsOpen] = useState(false);
+  const [activeOrgId, setActiveOrgId] = useState<string | null>(null);
+  const [initialized, setInitialized] = useState(false);
 
-  // sync local state with Clerk org changes and persist to localStorage
+  // init from localStorage + Clerk context on mount
   useEffect(() => {
-    const orgId = organization?.id || null;
-    localStorage.setItem('activeOrgId', orgId || 'personal');
-    onOrgChange?.(orgId);
-  }, [organization, onOrgChange]);
+    const savedOrgId = localStorage.getItem('activeOrgId');
+    
+    if (savedOrgId && savedOrgId !== 'personal') {
+      setActiveOrgId(savedOrgId);
+      onOrgChange?.(savedOrgId);
+    } else if (organization?.id && !savedOrgId) {
+      setActiveOrgId(organization.id);
+      localStorage.setItem('activeOrgId', organization.id);
+      onOrgChange?.(organization.id);
+    } else {
+      setActiveOrgId(null);
+      localStorage.setItem('activeOrgId', 'personal');
+      onOrgChange?.(null);
+    }
+    
+    setInitialized(true);
+  }, []);
 
+  // handle workspace change
   const handleSwitchOrg = async (orgId: string | null) => {
     try {
+      setIsOpen(false);
+      
       if (orgId === null) {
-        // switch to personal workspace
-        await setActive({ 
-          session: window.location.href.includes('session') ? null : undefined,
-          organization: null 
-        });
         
         localStorage.setItem('activeOrgId', 'personal');
-        setIsOpen(false);
-        
-        // Force UI update
+        setActiveOrgId(null);
         onOrgChange?.(null);
-        window.location.reload();  
-        return;
+        
+        // clear Clerk organization
+        await setActive({ organization: null });
+      } else {
+        // switch to organization
+        localStorage.setItem('activeOrgId', orgId);
+        setActiveOrgId(orgId);
+        onOrgChange?.(orgId);
+        
+        // set clerk organization
+        await setActive({ organization: orgId });
       }
-
-      // Switch to organization
-      await setActive({ organization: orgId });
-      localStorage.setItem('activeOrgId', orgId);
-      setIsOpen(false);
-      onOrgChange?.(orgId);
-      window.location.reload();  
     } catch (error) {
       console.error("Failed to switch organization:", error);
     }
   };
 
-  const currentWorkspace = organization?.name || "Personal";
-  const currentRole = organization ? "Member" : null;
+
+  const currentWorkspace = activeOrgId 
+    ? userMemberships?.data?.find(m => m.organization.id === activeOrgId)?.organization.name || "Organization"
+    : "Personal";
+  const currentRole = activeOrgId ? "Member" : null;
 
   return (
     <div className={`relative ${className}`}>
@@ -86,14 +102,14 @@ export const OrgSwitcher = ({ onOrgChange, className = "" }: OrgSwitcherProps) =
           <button
             onClick={() => handleSwitchOrg(null)}
             className={`w-full text-left px-4 py-3 hover:bg-gray-800 transition flex items-center justify-between ${
-              !organization ? "bg-blue-900/30 border-l-2 border-blue-500" : ""
+              activeOrgId === null ? "bg-blue-900/30 border-l-2 border-blue-500" : ""
             }`}
           >
             <div>
               <div className="text-sm font-medium text-white">Personal</div>
               <div className="text-xs text-gray-400">Your personal workspace</div>
             </div>
-            {!organization && (
+            {activeOrgId === null && (
               <svg className="w-4 h-4 text-green-500" fill="currentColor" viewBox="0 0 20 20">
                 <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
               </svg>
@@ -111,7 +127,7 @@ export const OrgSwitcher = ({ onOrgChange, className = "" }: OrgSwitcherProps) =
               key={membership.organization.id}
               onClick={() => handleSwitchOrg(membership.organization.id)}
               className={`w-full text-left px-4 py-3 hover:bg-gray-800 transition flex items-center justify-between ${
-                organization?.id === membership.organization.id
+                activeOrgId === membership.organization.id
                   ? "bg-blue-900/30 border-l-2 border-blue-500"
                   : ""
               }`}
@@ -124,7 +140,7 @@ export const OrgSwitcher = ({ onOrgChange, className = "" }: OrgSwitcherProps) =
                   {membership.role}
                 </div>
               </div>
-              {organization?.id === membership.organization.id && (
+              {activeOrgId === membership.organization.id && (
                 <svg className="w-4 h-4 text-green-500" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                 </svg>

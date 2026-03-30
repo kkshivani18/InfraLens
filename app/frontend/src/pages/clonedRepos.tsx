@@ -24,16 +24,15 @@ const ClonedReposPage = () => {
   const [activeOrgId, setActiveOrgId] = useState<string | null>(null);
   const workspaceType = activeOrgId ? "org" : "personal";
 
-  // init from Clerk org context
+  // init workspace from localStorage on mount 
   useEffect(() => {
-    if (organization?.id) {
-      setActiveOrgId(organization.id);
-      localStorage.setItem('activeOrgId', organization.id);
+    const savedOrgId = localStorage.getItem('activeOrgId');
+    if (savedOrgId && savedOrgId !== 'personal') {
+      setActiveOrgId(savedOrgId);
     } else {
       setActiveOrgId(null);
-      localStorage.removeItem('activeOrgId');
     }
-  }, [organization?.id]);
+  }, []);
 
   useEffect(() => {
     loadRepositories();
