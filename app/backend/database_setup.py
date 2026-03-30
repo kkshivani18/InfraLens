@@ -4,7 +4,7 @@ Run this once to initialize the database schema.
 """
 
 import asyncio
-from motor.motor_asyncio import AsyncClient
+from motor.motor_asyncio import AsyncIOMotorClient
 from core.database import get_database
 import os
 from dotenv import load_dotenv
@@ -15,7 +15,7 @@ async def setup_collections_and_indexes():
     """Create required collections and indexes for multi-tenancy"""
     
     try:
-        client = AsyncClient(os.getenv("MONGO_URI", "mongodb://localhost:27017"))
+        client = AsyncIOMotorClient(os.getenv("MONGO_URI", "mongodb://localhost:27017"))
         db = client[os.getenv("MONGO_DB", "infralens")]
         
         print("🔧 Setting up collections and indexes...")
@@ -132,7 +132,7 @@ async def setup_collections_and_indexes():
         print("  • Performance: Efficient lookups for multi-tenancy queries")
         print("  • Uniqueness: org_id + month for usage tracking")
         
-        await client.close()
+        client.close()
         
     except Exception as e:
         print(f"❌ Setup failed: {str(e)}")

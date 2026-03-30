@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '@clerk/clerk-react';
+import { useAuth, useOrganization } from '@clerk/clerk-react';
 import { ArrowRight, Trash2, ExternalLink, Clock } from 'lucide-react';
 import { repoService } from '../services/api';
+import OrgSwitcher from '../components/OrgSwitcher';
 
 interface Repository {
   _id: string;
@@ -16,18 +17,33 @@ interface Repository {
 const ClonedReposPage = () => {
   const navigate = useNavigate();
   const { getToken } = useAuth();
+  const { organization } = useOrganization();
   const [repos, setRepos] = useState<Repository[]>([]);
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [activeOrgId, setActiveOrgId] = useState<string | null>(null);
+  const workspaceType = activeOrgId ? "org" : "personal";
+
+  // init from Clerk org context
+  useEffect(() => {
+    if (organization?.id) {
+      setActiveOrgId(organization.id);
+      localStorage.setItem('activeOrgId', organization.id);
+    } else {
+      setActiveOrgId(null);
+      localStorage.removeItem('activeOrgId');
+    }
+  }, [organization?.id]);
 
   useEffect(() => {
     loadRepositories();
-  }, []);
+  }, [workspaceType, activeOrgId, getToken]);
 
   const loadRepositories = async () => {
     try {
+      setLoading(true);
       const token = await getToken();
-      const data = await repoService.getRepositories(token);
+      const data = await repoService.getRepositories(token, workspaceType, activeOrgId);
       setRepos(data.repositories || []);
     } catch (error) {
       console.error("Failed to load repositories:", error);
@@ -97,9 +113,13 @@ const ClonedReposPage = () => {
   }
 
   return (
-    <div className="p-10">
-      <h2 className="text-2xl font-bold mb-6">Your Cloned Repositories</h2>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <div className="flex flex-col h-full">
+      <div className="flex items-center justify-between p-4 border-b border-gray-700">
+        <h2 className="text-2xl font-bold">Your Cloned Repositories</h2>
+        <OrgSwitcher onOrgChange={setActiveOrgId} />
+      </div>
+      <div className="p-10 overflow-y-auto flex-1">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {repos.map((repo) => (
           <div 
             key={repo._id} 
@@ -147,6 +167,7 @@ const ClonedReposPage = () => {
             </div>
           </div>
         ))}
+        </div>
       </div>
     </div>
   );

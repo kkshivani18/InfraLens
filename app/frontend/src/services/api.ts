@@ -17,12 +17,17 @@ async function handleResponse(response: Response) {
     throw new Error("Unauthorized: Please sign in again");
   }
   
-  if (response.status === 404) {
-    throw new Error("Resource not found");
-  }
-  
   if (!response.ok) {
-    throw new Error(`Request failed with status ${response.status}`);
+    try {
+      const errorData = await response.json();
+      const detailMsg = errorData.detail || errorData.message || "Unknown error";
+      throw new Error(`${response.status}: ${detailMsg}`);
+    } catch (e) {
+      if (e instanceof Error && e.message.includes(":")) {
+        throw e; 
+      }
+      throw new Error(`Request failed with status ${response.status}`);
+    }
   }
   
   return response.json();
@@ -30,20 +35,24 @@ async function handleResponse(response: Response) {
 
 export const chatService = {
   async sendMessage(message: string, token: string | null, repositoryName?: string) {
+    const body: any = { 
+      message,
+      repository_name: repositoryName
+    };
+    
     const response = await fetch(`${BASE_URL}/api/chat`, {
       method: "POST",
       headers: await getAuthHeaders(token),
-      body: JSON.stringify({ 
-        message,
-        repository_name: repositoryName 
-      }),
+      body: JSON.stringify(body),
     });
     
     return handleResponse(response);
   },
 
   async getChatHistory(repositoryName: string, token: string | null) {
-    const response = await fetch(`${BASE_URL}/api/chat/history/${encodeURIComponent(repositoryName)}`, {
+    const url = `${BASE_URL}/api/chat/history/${encodeURIComponent(repositoryName)}`;
+    
+    const response = await fetch(url, {
       method: "GET",
       headers: await getAuthHeaders(token),
     });
@@ -53,18 +62,36 @@ export const chatService = {
 };
 
 export const repoService = {
-  async ingestRepo(repoUrl: string, token: string | null) {
+  async ingestRepo(repoUrl: string, token: string | null, orgId?: string | null) {
+    const body: any = { 
+      repo_url: repoUrl
+    };
+    
+    if (orgId) {
+      body.org_id = orgId;
+    }
+    
     const response = await fetch(`${BASE_URL}/api/ingest`, {
       method: "POST",
       headers: await getAuthHeaders(token),
-      body: JSON.stringify({ repo_url: repoUrl }),
+      body: JSON.stringify(body),
     });
     
     return handleResponse(response);
   },
 
-  async getRepositories(token: string | null) {
-    const response = await fetch(`${BASE_URL}/api/repositories`, {
+  async getRepositories(token: string | null, workspaceType: "personal" | "org" = "personal", orgId?: string | null) {
+    const params = new URLSearchParams();
+    params.append("workspace_type", workspaceType);
+    
+    if (orgId && workspaceType === "org") {
+      params.append("org_id", orgId);
+    }
+    
+    const queryString = params.toString();
+    const url = `${BASE_URL}/api/repositories${queryString ? "?" + queryString : ""}`;
+    
+    const response = await fetch(url, {
       method: "GET",
       headers: await getAuthHeaders(token),
     });
@@ -73,9 +100,45 @@ export const repoService = {
   },
   
   async deleteRepo(repoId: string, token: string | null) {
-    const response = await fetch(`${BASE_URL}/repositories/api/${repoId}`, {
+    const response = await fetch(`${BASE_URL}/api/repositories/${repoId}`, {
       method: "DELETE",
       headers: await getAuthHeaders(token),
+    });
+    
+    return handleResponse(response);
+  }
+};
+
+export const orgService = {
+  async inviteMember(email: string, token: string | null, orgId?: string) {
+    const response = await fetch(`${BASE_URL}/api/org/invite`, {
+      method: "POST",
+      headers: await getAuthHeaders(token),
+      body: JSON.stringify({ email, org_id: orgId }),
+    });
+    
+    return handleResponse(response);
+  },
+
+  async getOrgDetails(token: string | null, orgId?: string) {
+    const params = new URLSearchParams();
+    if (orgId) params.append("org_id", orgId);
+    const queryString = params.toString();
+    const url = `${BASE_URL}/api/org/details${queryString ? "?" + queryString : ""}`;
+    
+    const response = await fetch(url, {
+      method: "GET",
+      headers: await getAuthHeaders(token),
+    });
+    
+    return handleResponse(response);
+  },
+
+  async leaveOrganization(orgId: string, token: string | null) {
+    const response = await fetch(`${BASE_URL}/api/org/leave`, {
+      method: "POST",
+      headers: await getAuthHeaders(token),
+      body: JSON.stringify({ org_id: orgId }),
     });
     
     return handleResponse(response);

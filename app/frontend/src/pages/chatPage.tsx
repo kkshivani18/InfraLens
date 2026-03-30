@@ -1,17 +1,35 @@
 import { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
-import { useAuth } from '@clerk/clerk-react';
+import { useAuth, useOrganization } from '@clerk/clerk-react';
 import { chatService } from '../services/api';
+import OrgSwitcher from '../components/OrgSwitcher';
+import { ShareChatModal } from '../components/ShareChatModal';
 
 const ChatPage = () => {
   const location = useLocation();
   const { getToken } = useAuth();
+  const { organization } = useOrganization();
+  
   const [repoName, setRepoName] = useState<string | null>(null);
   const [messages, setMessages] = useState<{ role: string, text: string }[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  const [activeOrgId, setActiveOrgId] = useState<string | null>(null);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [chatSessionId, setChatSessionId] = useState<string>(Math.random().toString(36).substring(7));
+
+  // init from Clerk org context on mount
+  useEffect(() => {
+    if (organization?.id) {
+      setActiveOrgId(organization.id);
+      localStorage.setItem('activeOrgId', organization.id);
+    } else {
+      setActiveOrgId(null);
+      localStorage.setItem('activeOrgId', 'personal');
+    }
+  }, [organization]);
 
   useEffect(() => {
     if (location.state?.repoName) {
@@ -25,7 +43,7 @@ const ChatPage = () => {
       setRepoName(newRepoName);
       loadChatHistory(newRepoName);
     }
-  }, [location.state?.repoName]);
+  }, [location.state?.repoName, activeOrgId]);
 
   const loadChatHistory = async (repositoryName: string) => {
     setLoadingHistory(true);
@@ -58,6 +76,11 @@ const ChatPage = () => {
 
   const sendMessage = async () => {
     if (!input.trim()) return;
+    
+    if (!repoName) {
+      alert("Please select a repository first");
+      return;
+    }
 
     const userMsg = { role: "user", text: input};
     setMessages(prev => [...prev, userMsg]);
@@ -69,6 +92,17 @@ const ChatPage = () => {
     try {
       const token = await getToken();
       
+      if (!token) {
+        throw new Error("Authentication token not found. Please sign in again.");
+      }
+      
+      console.log("Sending message:", {
+        message: currentInput,
+        repository: repoName,
+        org_id: activeOrgId,
+        using_org: activeOrgId && activeOrgId !== 'personal' ? 'YES' : 'NO'
+      });
+      
       const data = await chatService.sendMessage(currentInput, token, repoName || undefined);
 
       // add AI resp to UI
@@ -76,8 +110,13 @@ const ChatPage = () => {
       setMessages(prev => [...prev, AImsg]);
     } catch (error) {
       console.error("Error connecting to backend:", error);
-      const errorMsg = { role: "assistant", text: "Error: Could not connect to backend." };
-      setMessages(prev => [...prev, userMsg, errorMsg]);
+      const errorMsg = error instanceof Error ? error.message : "Unknown error";
+      
+      const assistantMsg = { 
+        role: "assistant", 
+        text: `Error: ${errorMsg}. Please check your connection and try again.` 
+      };
+      setMessages(prev => [...prev, userMsg, assistantMsg]);
     } finally {
       setLoading(false);
     }
@@ -85,14 +124,30 @@ const ChatPage = () => {
 
   return (
     <div className="flex flex-col h-full">
-      {repoName && (
-        <div className="flex justify-center pt-4 pb-2">
-          <div className="bg-gray-800 border border-gray-700 rounded-lg px-4 py-2">
-            <span className="text-sm text-gray-400">Repository: </span>
-            <span className="text-sm font-semibold text-blue-400">{repoName}</span>
-          </div>
+      <div className="flex items-center justify-between p-4 border-b border-gray-700">
+        <OrgSwitcher onOrgChange={setActiveOrgId} />
+        
+        <div className="flex items-center gap-4">
+          {repoName && (
+            <div className="bg-gray-800 border border-gray-700 rounded-lg px-4 py-2">
+              <span className="text-sm text-gray-400">Repository: </span>
+              <span className="text-sm font-semibold text-blue-400">{repoName}</span>
+            </div>
+          )}
+          
+          {repoName && activeOrgId && activeOrgId !== 'personal' && (
+            <button
+              onClick={() => setIsShareModalOpen(true)}
+              className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg text-sm font-medium text-white transition flex items-center gap-2"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C9.839 10.323 12.84 8 16 8c3.623 0 6.885 2.104 8.236 5.186M8.684 13.342A9.978 9.978 0 0112 13c4.563 0 8.501 2.901 10.288 7M8.684 13.342A9.969 9.969 0 0112 3c4.563 0 8.501 2.901 10.288 7m0 0a9.967 9.967 0 01-4.288 2" />
+              </svg>
+              Share Chat
+            </button>
+          )}
         </div>
-      )}
+      </div>
       
       {loadingHistory ? (
         <div className="flex items-center justify-center flex-1">
@@ -146,6 +201,13 @@ const ChatPage = () => {
           disabled={!repoName || loading}
         />
       </div>
+
+      <ShareChatModal
+        isOpen={isShareModalOpen}
+        onClose={() => setIsShareModalOpen(false)}
+        chatSessionId={chatSessionId}
+        repositoryName={repoName || ''}
+      />
     </div>
   );
 };

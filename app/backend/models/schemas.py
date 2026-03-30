@@ -102,6 +102,7 @@ class ChatRequest(BaseModel):
     """Chat API request"""
     message: str
     repository_name: Optional[str] = None
+    org_id: Optional[str] = None
 
 class IngestRequest(BaseModel):
     """Repository ingestion API request"""

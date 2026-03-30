@@ -9,6 +9,7 @@ import SignUpPage from './features/auth/pages/SignUpPage';
 import LandingPage from './pages/LandingPage';
 import { PricingPage } from './pages/PricingPage';
 import { PricingSuccessPage } from './pages/PricingSuccessPage';
+import OrgSettingsPage from './pages/OrgSettingsPage';
 
 function App() {
   return (
@@ -47,6 +48,7 @@ function App() {
           <Route path="/chat" element={<ChatPage />} />
           <Route path="/add" element={<AddRepo />} />
           <Route path="/repos" element={<ClonedRepos />} />
+          <Route path="/org-settings" element={<OrgSettingsPage />} />
           <Route path="/pricing/success" element={<PricingSuccessPage />} />
         </Route>
       </Routes>

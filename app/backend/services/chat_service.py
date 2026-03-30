@@ -82,12 +82,12 @@ def get_prioritized_docs(vector_store, user_query: str, k: int = 6):
     return vector_store.similarity_search(user_query, k=k)
 
 async def get_user_repository(user_id: str, repo_name: str = None):
-    """Get user's repository from MongoDB to find collection name"""
+    """Get user's repository from MongoDB to find collection name.
+    Searches for both personal repos and org repos that the user has access to."""
     db = get_database()
     
     if repo_name:
         repo = await db.repositories.find_one({
-            "user_id": user_id,
             "name": repo_name
         })
     else:

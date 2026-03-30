@@ -183,8 +183,9 @@ export function PricingPage() {
         </p>
       </div>
 
+      <br></br>
       {/* Current Subscription Info */}
-      {isSignedIn && currentSubscription && (
+      {/* {isSignedIn && currentSubscription && (
         <div className="max-w-3xl mx-auto mb-12 p-4 bg-slate-700/50 border border-slate-600 rounded-lg">
           <p className="text-slate-200">
             Current Plan:{' '}
@@ -198,15 +199,15 @@ export function PricingPage() {
             )}
           </p>
         </div>
-      )}
+      )} */}
 
       {/* Error Message */}
-      {checkout.error && (
+      {/* {checkout.error && (
         <div className="max-w-3xl mx-auto mb-8 p-4 bg-red-900/20 border border-red-500 text-red-200 rounded-lg">
           <p className="font-semibold">Payment Error</p>
           <p>{checkout.error}</p>
         </div>
-      )}
+      )} */}
 
       {/* Pricing Cards */}
       <div className="max-w-7xl mx-auto grid md:grid-cols-3 gap-8">

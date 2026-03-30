@@ -7,10 +7,10 @@ from services.chat_service import get_chat_response
 from services.user_service import update_github_token, get_or_create_user, get_github_token, disconnect_github
 from core.auth import get_current_user
 from core.database import connect_to_mongo, close_mongo_connection
-from models.schemas import ChatRequest, IngestRequest, GitHubConnectRequest, CreateSubscriptionRequest, CreateSubscriptionResponse, SubscriptionStatusResponse, ShareChatRequest
+from models.schemas import ChatRequest, IngestRequest, GitHubConnectRequest, CreateSubscriptionRequest, CreateSubscriptionResponse, SubscriptionStatusResponse, ShareChatRequest, InviteRequest, OrgDetailsResponse, IngestRequestWithOrg
 from services.payment_service import payment_service
 from services.entitlement_service import entitlement_checker
-from services.org_service import require_org_access
+from services.org_service import require_org_access, invite_member, get_org_details, ensure_org_exists_in_db
 from bson import ObjectId
 import traceback
 import json
@@ -51,22 +51,25 @@ async def health_check():
     return {"status": "active", "service": "InfraLens API"}
 
 @app.post("/api/ingest")
-async def ingest_endpoint(request: IngestRequest, current_user: dict = Depends(get_current_user)):
+async def ingest_endpoint(request: IngestRequestWithOrg, current_user: dict = Depends(get_current_user)):
     try:
         from core.database import get_database
         from datetime import datetime
         
         db = get_database()
         user_id = current_user["user_id"]
-        org_id = current_user.get("org_id")  # from Clerk JWT
+        
+        org_id = request.org_id or current_user.get("org_id")
         
         print(f"Starting ingestion for: {request.repo_url} by user: {user_id}, org: {org_id}")
         
-        # If ingesting to org, validate user is org member
         if org_id:
+            await ensure_org_exists_in_db(org_id, db, current_user)
             org = await db.organizations.find_one({"org_id": org_id})
-            if not org or user_id not in org.get("member_user_ids", []):
-                raise HTTPException(status_code=403, detail="You are not a member of this organization")
+            is_owner = org and org.get("owner_user_id") == user_id
+            is_member = org and user_id in org.get("member_user_ids", [])
+            if not org or (not is_owner and not is_member):
+                raise HTTPException(status_code=403, detail="You are not authorized to ingest repos for this organization")
             
             # Check org quota before ingestion
             month_key = datetime.utcnow().strftime("%Y-%m")
@@ -179,16 +182,22 @@ async def health_check():
 async def chat_endpoint(request: ChatRequest, current_user: dict = Depends(get_current_user)):
     user_msg = request.message
     user_id = current_user["user_id"]
+    
     org_id = current_user.get("org_id")
 
     try:
         from core.database import get_database
         db = get_database()
         
+        print(f"[Chat] User: {user_id}, Org: {org_id}, Repository: {request.repository_name}")
+        print(f"[Chat] Message: {user_msg[:50]}...")
+        
         # validate access to repository
         repo = await db.repositories.find_one({"name": request.repository_name})
         if not repo:
             raise HTTPException(status_code=404, detail="Repository not found")
+        
+        print(f"[Chat] Found repo - user_id: {repo.get('user_id')}, org_id: {repo.get('org_id')}")
         
         # workspace isolation
         repo_user_id = repo.get("user_id")
@@ -198,15 +207,19 @@ async def chat_endpoint(request: ChatRequest, current_user: dict = Depends(get_c
         if repo_org_id is None and repo_user_id:
             if repo_user_id != user_id:
                 raise HTTPException(status_code=403, detail="You do not have access to this repository")
+            print(f"[Chat] ✓ Personal repo access granted")
         
-        # org repo
+        # validate user is owner or member
         if repo_org_id:
-            if org_id != repo_org_id:
-                raise HTTPException(status_code=403, detail="You do not have access to this organization's repository")
+            await ensure_org_exists_in_db(repo_org_id, db, current_user)
             
-            org = await db.organizations.find_one({"org_id": org_id})
-            if not org or user_id not in org.get("member_user_ids", []):
-                raise HTTPException(status_code=403, detail="You are not a member of this organization")
+            org = await db.organizations.find_one({"org_id": repo_org_id})
+            is_owner = org and org.get("owner_user_id") == user_id
+            is_member = org and user_id in org.get("member_user_ids", [])
+            if not org or (not is_owner and not is_member):
+                print(f"[Chat] ✗ Not org member")
+                raise HTTPException(status_code=403, detail="You are not authorized to access this organization's repository")
+            print(f"[Chat] ✓ Org repo access granted")
         
         ai_response = await get_chat_response(user_msg, user_id, request.repository_name)
         return {"response": ai_response}
@@ -217,17 +230,19 @@ async def chat_endpoint(request: ChatRequest, current_user: dict = Depends(get_c
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/repositories")
-async def get_repositories(workspace_type: str = "personal", current_user: dict = Depends(get_current_user)):
+async def get_repositories(workspace_type: str = "personal", org_id: str = None, current_user: dict = Depends(get_current_user)):
     """Get repositories for current workspace (strict isolation).
     
     Args:
         workspace_type: "personal" or "org" (default: "personal")
+        org_id: Optional org_id from query param (overrides JWT org_id)
     """
     try:
         from core.database import get_database
         db = get_database()
         user_id = current_user["user_id"]
-        org_id = current_user.get("org_id")
+        jwt_org_id = current_user.get("org_id")        
+        final_org_id = org_id or jwt_org_id
         
         repositories = []
         
@@ -239,17 +254,21 @@ async def get_repositories(workspace_type: str = "personal", current_user: dict 
         
         # Org workspace 
         elif workspace_type == "org":
-            if not org_id:
+            if not final_org_id:
                 raise HTTPException(status_code=400, detail="No organization selected")
             
-            # Validate user is org member
-            org = await db.organizations.find_one({"org_id": org_id})
-            if not org or user_id not in org.get("member_user_ids", []):
-                raise HTTPException(status_code=403, detail="You are not a member of this organization")
+            await ensure_org_exists_in_db(final_org_id, db, current_user)
+            
+            # validate user is org owner or member
+            org = await db.organizations.find_one({"org_id": final_org_id})
+            is_owner = org and org.get("owner_user_id") == user_id
+            is_member = org and user_id in org.get("member_user_ids", [])
+            if not org or (not is_owner and not is_member):
+                raise HTTPException(status_code=403, detail="You are not authorized to access this organization")
             
             # Return ONLY org repos, never personal repos
             repositories = await db.repositories.find(
-                {"org_id": org_id}
+                {"org_id": final_org_id}
             ).sort("ingested_at", -1).to_list(length=100)
         
         else:
@@ -274,7 +293,8 @@ async def get_chat_history(repository_name: str, current_user: dict = Depends(ge
         from core.database import get_database
         db = get_database()
         user_id = current_user["user_id"]
-        org_id = current_user.get("org_id")
+        
+        final_org_id = current_user.get("org_id")
         
         # validate access to repo
         repo = await db.repositories.find_one({"name": repository_name})
@@ -290,14 +310,15 @@ async def get_chat_history(repository_name: str, current_user: dict = Depends(ge
             if repo_user_id != user_id:
                 raise HTTPException(status_code=403, detail="You do not have access to this repository")
         
-        # Org repo
+        # validate user is owner or member
         if repo_org_id:
-            if org_id != repo_org_id:
-                raise HTTPException(status_code=403, detail="You do not have access to this organization's repository")
+            await ensure_org_exists_in_db(repo_org_id, db, current_user)
             
-            org = await db.organizations.find_one({"org_id": org_id})
-            if not org or user_id not in org.get("member_user_ids", []):
-                raise HTTPException(status_code=403, detail="You are not a member of this organization")
+            org = await db.organizations.find_one({"org_id": repo_org_id})
+            is_owner = org and org.get("owner_user_id") == user_id
+            is_member = org and user_id in org.get("member_user_ids", [])
+            if not org or (not is_owner and not is_member):
+                raise HTTPException(status_code=403, detail="You are not authorized to access this organization's repository")
         
         # Get chat history scoped to user + repository
         chats = await db.chats.find({
@@ -383,13 +404,29 @@ async def delete_repository(repo_id: str, current_user: dict = Depends(get_curre
         db = get_database()
         user_id = current_user["user_id"]
         
-        repo = await db.repositories.find_one({
-            "_id": ObjectId(repo_id),
-            "user_id": user_id
-        })
+        # get repo first
+        try:
+            repo = await db.repositories.find_one({"_id": ObjectId(repo_id)})
+        except Exception:
+            repo = None
         
         if not repo:
-            raise HTTPException(status_code=404, detail="Repository not found or access denied")
+            raise HTTPException(status_code=404, detail="Repository not found")
+        
+        # personal repo access
+        if repo.get("user_id") and not repo.get("org_id"):
+            if repo["user_id"] != user_id:
+                raise HTTPException(status_code=403, detail="You do not have access to this repository")
+            
+        # org repo access
+        elif repo.get("org_id"):
+            org = await db.organizations.find_one({"org_id": repo["org_id"]})
+            is_owner = org and org.get("owner_user_id") == user_id
+            is_member = org and user_id in org.get("member_user_ids", [])
+            if not org or (not is_owner and not is_member):
+                raise HTTPException(status_code=403, detail="You do not have access to this organization's repository")
+        else:
+            raise HTTPException(status_code=404, detail="Repository not found")
         
         collection_name = repo["collection_name"]
         
@@ -516,10 +553,12 @@ async def share_chat(
                 detail="Chat sharing is only available in Team workspaces"
             )
         
-        # Validate org exists and user is member
+        # Validate org exists and user is member or owner
         org = await db.organizations.find_one({"org_id": org_id})
-        if not org or user_id not in org.get("member_user_ids", []):
-            raise HTTPException(status_code=403, detail="You are not a member of this organization")
+        is_owner = org and org.get("owner_user_id") == user_id
+        is_member = org and user_id in org.get("member_user_ids", [])
+        if not org or (not is_owner and not is_member):
+            raise HTTPException(status_code=403, detail="You are not authorized to access this organization")
         
         # Validate repository exists and belongs to this org
         repo = await db.repositories.find_one(
@@ -558,4 +597,126 @@ async def share_chat(
         raise
     except Exception as e:
         print(f"Exception in share_chat: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Org Management Endpoints ---------------------------------
+
+@app.get("/api/org/details")
+async def get_org_details_endpoint(org_id: str = None, current_user: dict = Depends(get_current_user)):
+    """Get organization details (members, quota, plan info)"""
+    try:
+        from core.database import get_database
+        db = get_database()
+        
+        auth_org_id = current_user.get("org_id")
+        request_org_id = org_id
+        
+        final_org_id = request_org_id or auth_org_id
+        
+        if not final_org_id or final_org_id == "None":
+            return {
+                "error": "not_in_org",
+                "message": "You are not in an organization. Switch to an organization workspace using the dropdown at the top left."
+            }
+        
+        try:
+            await ensure_org_exists_in_db(final_org_id, db, current_user)
+        except HTTPException as e:
+            if e.status_code == 404:
+                return {
+                    "error": "org_not_found",
+                    "message": "Organization not found. It may have been deleted."
+                }
+            raise
+        
+        org_details = await get_org_details(final_org_id, db)
+        return org_details
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Exception in get_org_details_endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class InviteRequestWithOrg(BaseModel):
+    email: str
+    org_id: str = None
+
+@app.post("/api/org/invite")
+async def invite_member_endpoint(
+    request: InviteRequestWithOrg,
+    current_user: dict = Depends(get_current_user),
+):
+    """Invite a new member to the organization"""
+    try:
+        from core.database import get_database
+        db = get_database()
+        
+        auth_org_id = current_user.get("org_id")
+        request_org_id = request.org_id
+        
+        final_org_id = request_org_id or auth_org_id
+        
+        if not final_org_id:
+            return {
+                "error": "not_in_org",
+                "message": "Not in an organization. Switch to an organization workspace first."
+            }
+        
+     
+        await ensure_org_exists_in_db(final_org_id, db, current_user)
+        
+        result = await invite_member(final_org_id, request.email, current_user, db)
+        return result
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Exception in invite_member_endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/org/leave")
+async def leave_organization_endpoint(current_user: dict = Depends(get_current_user)):
+    """Leave current organization"""
+    try:
+        from core.database import get_database
+        db = get_database()
+        
+        user_id = current_user.get("user_id")
+        org_id = current_user.get("org_id")
+        
+        if not org_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Not in an organization"
+            )
+        
+        # Fetch org
+        org = await db.organizations.find_one({"org_id": org_id})
+        if not org:
+            raise HTTPException(status_code=404, detail="Organization not found")
+        
+        # Remove user from org's member list
+        await db.organizations.update_one(
+            {"org_id": org_id},
+            {"$pull": {"member_user_ids": user_id}}
+        )
+        
+        # Update user's org_id to None
+        await db.users.update_one(
+            {"user_id": user_id},
+            {"$set": {"org_id": None}}
+        )
+        
+        return {
+            "status": "success",
+            "message": f"You have left the organization '{org['name']}'"
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Exception in leave_organization_endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

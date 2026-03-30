@@ -250,3 +250,147 @@ async def reset_org_quota_if_needed(org_id: str, db: Database) -> None:
             {"org_id": org_id},
             {"$set": {"quota_reset_date": now}}
         )
+
+
+async def get_org_details(org_id: str, db: Database) -> Dict:
+    """
+    Retrieve organization details with member count and quota info.
+    
+    Args:
+        org_id: Organization ID
+        db: MongoDB connection
+    
+    Returns:
+        Organization details dictionary
+    """
+    org = await db.organizations.find_one({"org_id": org_id})
+    if not org:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Organization not found"
+        )
+    
+    # Get current month's ingestion count
+    month_key = datetime.utcnow().strftime("%Y-%m")
+    usage = await db.usage.find_one({"org_id": org_id, "month": month_key})
+    repos_ingested_this_month = usage.get("repos_ingested", 0) if usage else 0
+    
+    return {
+        "org_id": org["org_id"],
+        "name": org["name"],
+        "owner_user_id": org["owner_user_id"],
+        "plan": org.get("plan", {}).get("name", "team"),
+        "member_count": len(org.get("member_user_ids", [])),
+        "seats_max": org.get("seats_max", 5),
+        "ingestion_quota_monthly": org.get("ingestion_quota_monthly", 100),
+        "repos_ingested_this_month": repos_ingested_this_month,
+        "created_at": org["created_at"].isoformat() if isinstance(org["created_at"], datetime) else org["created_at"]
+    }
+
+
+async def sync_org_from_clerk(org_id: str, clerk_org_data: Dict, db: Database) -> Dict:
+    """
+    Sync an organization from Clerk to MongoDB.
+    Called when accessing an org for the first time.
+    
+    Args:
+        org_id: Clerk organization ID
+        clerk_org_data: Organization data from Clerk (contains name, created_at, etc.)
+        db: MongoDB connection
+    
+    Returns:
+        Organization document
+    """
+    # check org already exists
+    existing_org = await db.organizations.find_one({"org_id": org_id})
+    if existing_org:
+        return existing_org
+    
+    # create new org 
+    new_org = {
+        "org_id": org_id,
+        "name": clerk_org_data.get("name", "Untitled Organization"),
+        "owner_user_id": clerk_org_data.get("created_by", ""),  # From Clerk
+        "plan": {
+            "name": "team",
+            "price_inr": 0,
+            "status": "inactive"
+        },
+        "member_user_ids": clerk_org_data.get("members", []),  # Clerk member IDs
+        "seats_max": 5,  # Default for team plan
+        "ingestion_quota_monthly": 100,  # Default quota
+        "ingestion_count_this_month": 0,
+        "quota_reset_date": datetime.utcnow(),
+        "created_at": datetime.utcnow(),
+        "updated_at": datetime.utcnow()
+    }
+    
+    try:
+        await db.organizations.insert_one(new_org)
+        print(f"✅ Synced organization {org_id} from Clerk to MongoDB")
+        return new_org
+    except Exception as e:
+        if "duplicate key error" in str(e):
+            # Race condition - org was created between check and insert
+            return await db.organizations.find_one({"org_id": org_id})
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to sync organization: {str(e)}"
+        )
+
+
+async def ensure_org_exists_in_db(org_id: str, db: Database, ctx: Dict = None) -> Dict:
+    """
+    Ensure an organization exists in MongoDB.
+    If not, fetch from Clerk and create it.
+    
+    Args:
+        org_id: Organization ID
+        db: MongoDB connection
+        ctx: User context (optional)
+    
+    Returns:
+        Organization document from MongoDB
+    """
+    # Check if already in MongoDB
+    org = await db.organizations.find_one({"org_id": org_id})
+    if org:
+        return org
+    
+    # Fetch from Clerk and sync
+    try:
+        if not CLERK_API_KEY:
+            raise Exception("CLERK_API_KEY not configured")
+            
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{CLERK_API_URL}/organizations/{org_id}",
+                headers={"Authorization": f"Bearer {CLERK_API_KEY}"}
+            )
+            
+            if response.status_code != 200:
+                # Log the error but don't fail completely - org might exist in MongoDB
+                print(f"⚠️  Failed to fetch org {org_id} from Clerk API: {response.status_code} - {response.text}")
+                # Check MongoDB one more time before failing
+                org = await db.organizations.find_one({"org_id": org_id})
+                if org:
+                    print(f"✅ Org {org_id} found in MongoDB, using existing record")
+                    return org
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Organization {org_id} not found in Clerk. Please ensure the organization exists and you have access to it."
+                )
+            
+            clerk_org = response.json()
+            
+            # Sync to MongoDB
+            return await sync_org_from_clerk(org_id, clerk_org, db)
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error in ensure_org_exists_in_db: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to verify organization: {str(e)}"
+        )

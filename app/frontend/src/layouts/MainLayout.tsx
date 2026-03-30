@@ -8,6 +8,7 @@ const MainLayout = () => {
     { path: '/chat', label: 'Chat with AI Assistant', icon: '🤖' },
     { path: '/repos', label: 'Cloned Repositories', icon: '📂' },
     { path: '/add', label: 'Add Repository', icon: '➕' },
+    { path: '/org-settings', label: 'Organization Settings', icon: '⚙️' },
   ];
 
   return (
