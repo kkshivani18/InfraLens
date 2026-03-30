@@ -4,9 +4,10 @@ import { useState, useEffect } from 'react';
 interface OrgSwitcherProps {
   onOrgChange?: (orgId: string | null) => void;
   className?: string;
+  dropdownAlign?: 'left' | 'right'; 
 }
 
-export const OrgSwitcher = ({ onOrgChange, className = "" }: OrgSwitcherProps) => {
+export const OrgSwitcher = ({ onOrgChange, className = "", dropdownAlign = "right" }: OrgSwitcherProps) => {
   const { organization } = useOrganization();
   const { userMemberships } = useOrganizationList({ userMemberships: true });
   const { setActive } = useClerk();
@@ -97,7 +98,9 @@ export const OrgSwitcher = ({ onOrgChange, className = "" }: OrgSwitcherProps) =
 
       {/* Dropdown Menu */}
       {isOpen && (
-        <div className="absolute top-full left-0 mt-2 w-56 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-50">
+        <div className={`absolute top-full mt-2 w-56 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-50 ${
+          dropdownAlign === 'left' ? 'left-0' : 'right-0'
+        }`}>
           {/* Personal Workspace */}
           <button
             onClick={() => handleSwitchOrg(null)}

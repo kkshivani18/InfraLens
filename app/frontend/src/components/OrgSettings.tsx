@@ -25,6 +25,7 @@ export const OrgSettings = () => {
   const { getToken } = useAuth();
   const { organization } = useOrganization();
   
+  const [orgId, setOrgId] = useState<string | null>(null);
   const [orgDetails, setOrgDetails] = useState<OrgDetailsType | null>(null);
   const [inviteEmail, setInviteEmail] = useState('');
   const [loading, setLoading] = useState(true);
@@ -32,23 +33,38 @@ export const OrgSettings = () => {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  // Fetch org details on mount
+  // get org_id from localStorage 
   useEffect(() => {
-    if (!organization?.id) {
+    const savedOrgId = localStorage.getItem('activeOrgId');
+    
+    if (savedOrgId && savedOrgId !== 'personal') {
+      setOrgId(savedOrgId);
+    } 
+    else if (organization?.id) {
+      setOrgId(organization.id);
+      localStorage.setItem('activeOrgId', organization.id);
+    } 
+    else {
+      setOrgId(null);
+    }
+  }, [organization?.id]);
+
+  useEffect(() => {
+    if (!orgId) {
       setError("Not in an organization");
       setLoading(false);
       return;
     }
 
     fetchOrgDetails();
-  }, [organization?.id]);
+  }, [orgId]);
 
   const fetchOrgDetails = async () => {
     try {
       setLoading(true);
       setError(null);
       const token = await getToken();
-      const data = await orgService.getOrgDetails(token, organization?.id);
+      const data = await orgService.getOrgDetails(token, orgId!);
       
       if (data.error) {
         setError(data.message || "Failed to load organization details");
@@ -73,13 +89,18 @@ export const OrgSettings = () => {
       return;
     }
 
+    if (!orgId) {
+    setError('Organization ID not found');
+    return;
+  }
+
     setInviting(true);
     setError(null);
     setSuccess(null);
 
     try {
       const token = await getToken();
-      await orgService.inviteMember(inviteEmail, token, organization?.id);
+      await orgService.inviteMember(inviteEmail, token, orgId);
       
       setSuccess(`Invitation sent to ${inviteEmail}`);
       setInviteEmail('');
@@ -102,7 +123,7 @@ export const OrgSettings = () => {
     }
   };
 
-  if (!organization?.id) {
+  if (!orgId) {
     return (
       <div className="flex items-center justify-center h-full">
         <div className="text-center">

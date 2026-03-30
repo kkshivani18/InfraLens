@@ -123,7 +123,7 @@ const ChatPage = () => {
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between p-4 border-b border-gray-700">
-        <OrgSwitcher onOrgChange={setActiveOrgId} />
+        <OrgSwitcher onOrgChange={setActiveOrgId} dropdownAlign="left" />
         
         <div className="flex items-center gap-4">
           {repoName && (
