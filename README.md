@@ -1,21 +1,34 @@
-## InfraLens: The AI-Native Onboarding Platform
-AI-powered codebase analysis platform. Chat with your GitHub repositories using natural language.
+## InfraLens: The AI-Native Project Analysis Platform
+AI-powered codebase analysis platform with workspace-based team collaboration. Chat with your GitHub repositories using natural language — solo or with your team.
 
 ## What It Does
 - Clone and analyze both **public and private** GitHub repositories with Personal Access Token integration
 - Index code using hybrid vector search (dense + sparse embeddings) with support for 15+ file types
 - Chat with your codebase using LLM (Groq) with context-aware retrieval
-- Multi-user support with secure authentication (Clerk)
-- Persistent chat history per repository with conversation retrieval
+- **Multi-tenant architecture** with isolated personal & organization workspaces
+- **Team collaboration** with role-based access control (Admin, Members)
+- **Shared memory spaces** where team members access common ingested repositories and indexed code
 - Full repository management (list, view metadata, delete with cleanup)
 - GitHub account connection/disconnection for seamless private repo access
+- Subscription-based plans (Free, Pro, Team) with usage quotas
 
 ## Features
 
-### 🔐 Authentication & Multi-tenancy
-- Secure user authentication via Clerk
-- Per-user repository isolation and management
-- GitHub Personal Access Token integration for private repositories
+### 🔐 Authentication & Multi-Tenancy
+- Secure user authentication via Clerk with organization support
+- **Personal Workspace:** Individual user repository isolation and management
+- **Organization Workspace:** Multi-member team space with shared repositories and indexed memory
+- **Role-Based Access Control:** Organization Owner, Admin, and Member roles with granular permissions
+- **JWT-Based Tenancy:** Clerk JWT extracts org context; MongoDB cross-checks for consistency
+- GitHub Personal Access Token integration for private repositories (per-user storage)
+
+### 👥 Team Collaboration (Organization Workspaces)
+- **Organization Creation:** Users can create organizations and invite team members
+- **Member Invitations:** Send invites via email with automatic role assignment (Member roles)
+- **Shared Repositories:** Ingest public/private repos to organization workspace for team access
+- **Unified Memory:** All team members search over the same ingested repository index
+- **Member Management:** View team members, their roles, and organization quota usage
+- **Access Audit:** Clerk ensures only invited members with valid org_role can access org resources
 
 ### 📦 Repository Support
 - **Public repositories:** Direct cloning via URL
@@ -29,11 +42,20 @@ AI-powered codebase analysis platform. Chat with your GitHub repositories using 
 - Context-aware retrieval with smart prioritization (README, package.json for broad questions)
 - Language-aware code splitting for Python, JavaScript, TypeScript, Go, Java, Rust, Markdown, Terraform, YAML
 - Per-repository conversation history (last 10 chats retrievable)
+- **Org-scoped chat:** Conversation history visible to all team members in organization workspace
+
+### 💳 Subscription & Billing
+- **Free Plan:** Personal workspace with monthly limits
+- **Pro Plan (₹100/month):** Enhanced quota for individual developers
+- **Team Plan (₹250/month):** Organization workspace with higher limits for team collaboration
+- Razorpay integration with webhook-based payment processing
+- Automatic subscription renewal with expiry-based entitlement checking
 
 ### Repository Management
-- List all ingested repositories with metadata (ingestion date, file/chunk counts, privacy status)
+- List all ingested repositories with metadata (ingestion date, file/chunk counts, privacy status, workspace scope)
 - Delete repositories with full cleanup (removes from MongoDB, Qdrant, and temporary files)
 - Repository status tracking and GitHub connection monitoring
+- **Quota Enforcement:** Monthly per-tenant (user or org) limits tracked and enforced
 
 ## Tech Stack
 
@@ -71,13 +93,15 @@ AI-powered codebase analysis platform. Chat with your GitHub repositories using 
 
 ## Usage
 
-### For Public Repositories
+### Personal Workspace (For Individual Users)
+
+#### For Public Repositories
 1. Sign up/login via Clerk
 2. Add a GitHub repository URL
 3. Wait for ingestion (indexing takes 30s-2min depending on repo size)
 4. Start chatting with your codebase
 
-### For Private Repositories
+#### For Private Repositories
 1. Sign up/login via Clerk
 2. **Connect GitHub:** Navigate to "Add Repository" and set up your Personal Access Token
    - Generate a PAT from GitHub Settings → Developer settings → Personal access tokens
@@ -86,96 +110,169 @@ AI-powered codebase analysis platform. Chat with your GitHub repositories using 
 4. Wait for ingestion with authenticated cloning
 5. Start chatting with your codebase
 
-### Repository Management
-- **View all repositories:** Navigate to "Cloned Repos" to see all ingested repositories
+### Organization Workspace (For Team Collaboration)
+
+#### Create an Organization
+1. Sign up/login via Clerk
+2. Navigate to Settings → Create Organization
+3. Provide organization name and details
+4. You become the Organization Owner
+
+#### Invite Team Members
+1. Navigate to Settings → Team Members → Invite
+2. Enter team member email address
+3. Send invitation (members receive email with invite link)
+4. Once accepted, member can:
+   - View all organization repositories
+   - Chat with org-indexed code
+   - Access shared chat history
+
+#### Ingest Repository to Organization
+1. Select Organization from workspace switcher (top-left)
+2. Click "Add Repository"
+3. Provide repository URL (public or private)
+4. Wait for ingestion—all team members can now search and query this repository
+5. Chat history is shared across all org members
+
+#### Member Roles & Permissions
+- **Owner:** Created the organization, full access to settings and billing
+- **Admin:** Can manage members, invite/remove, and manage repositories
+- **Member:** Can view repositories, chat, and access shared conversation history
+
+#### View Organization Quota
+1. Navigate to Settings → Team Members → Organization Stats
+2. See monthly ingestion quota usage across all team members
+3. Upgrade to Team plan for higher limits
+
+### Workspace Switching
+- Use the workspace switcher (top-left header) to switch between Personal workspace and any organization you're a member of
+- Organization selection persists in browser—your workspace choice is remembered
+- All chat history and repositories are scoped to the active workspace
+
+## Repository Management
+- **View all repositories:** Navigate to "Cloned Repos" to see all ingested repositories in active workspace
 - **Delete repositories:** Click delete to remove repo from database, vector store, and cleanup temporary files
-- **Chat history:** Access previous conversations (last 10 per repository)
+- **Chat history:** Access previous conversations (last 10 per repository, team-visible if in org workspace)
 - **Switch repositories:** Select different repos from the dropdown in chat interface
 
-## Architecture  
+## Architecture
 
-**Ingestion Flow:**
-1. **Repository Validation:** Check GitHub API for privacy status (uses PAT if available)
-2. **Clone Repository:** GitPython clones to temporary directory with authentication for private repos
-3. **File Parsing:** Scan 15+ file types, skip exclusion patterns (`node_modules`, `.git`, etc.)
-4. **Encoding Detection:** Use chardet for robust file reading across different encodings
-5. **Language-Aware Splitting:** Apply custom text splitters based on file type (Python, JS, Go, Java, Rust, Markdown, Terraform, YAML, generic)
-6. **Embedding Generation:** 
-   - Dense embeddings: `sentence-transformers/all-MiniLM-L6-v2`
-   - Sparse embeddings: `Qdrant/bm25`
-7. **Vector Storage:** Store in Qdrant with hybrid retrieval mode
-8. **Metadata Storage:** Save repository info, file count, chunk count, ingestion timestamp to MongoDB
-9. **Cleanup:** Removes temporary cloned files
+InfraLens uses a **multi-tenant, workspace-based architecture** with complete data isolation between personal and organization workspaces.
 
-**Chat Flow:**
-1. **User Query:** Receive question with repository context
-2. **Vector Retrieval:** Hybrid search in Qdrant (dense + sparse) for relevant code chunks
-3. **Smart Prioritization:** Boost README/package.json for broad architectural questions
-4. **Context Building:** Assemble retrieved chunks with metadata
-5. **LLM Processing:** Send to Groq API with context and receive AI response
-6. **Response Delivery:** Return AI response to user
-7. **History Storage:** Save conversation to MongoDB with timestamp
+### Core Design
 
-**GitHub Integration Flow:**
-1. **Token Storage:** User provides GitHub PAT → Validated and stored in MongoDB (per-user)
-2. **Privacy Detection:** Before cloning, GitHub API checks if repo is private
-3. **Authenticated Cloning:** Use stored PAT for private repository access
-4. **Connection Management:** Users can connect/disconnect GitHub accounts
+**Multi-Tenant Isolation**
+- **Personal Workspace:** Data scoped by `user_id`; accessible only to the owning user
+- **Organization Workspace:** Data scoped by `org_id`; accessible to all org members with valid roles
+- **Collection Naming:** Tenant-prefixed collections (`user_*` / `org_*`) in Qdrant ensure strict data boundaries
 
-**Deletion Flow:**
-1. Remove repository metadata from MongoDB
-2. Delete vector collection from Qdrant
-3. Remove all associated chat history
-4. Cleanup temporary files (if any)
+**Authorization Model (JWT-First)**
+- Clerk JWT is the source of truth for organization membership
+- All requests extract tenant scope (`user_id` or `org_id`) from JWT
+- MongoDB member list acts as consistency cache, not primary authority
+- Result: Immediate member access/removal with no sync delays
 
-**Payment Integration Flow:**
-1. **Subscription Selection:** User selects Pro/Team plan on pricing page
-2. **API Call:** Frontend calls `/api/payments/create-subscription` with plan name
-3. **Customer Creation:** Backend creates Razorpay customer (with email) or fetches existing
-4. **Subscription Creation:** Backend creates Razorpay subscription with customer_id, plan_id, and billing config
-5. **Checkout Modal:** Frontend receives subscription ID and opens Razorpay checkout modal
-6. **Payment Entry:** User enters card details in Razorpay modal
-7. **Payment Processing:** Razorpay processes payment with configured billing cycle
-8. **Webhook Event:** Razorpay sends webhook event (`subscription.activated`, `payment.captured`, etc.) to backend
-9. **Webhook Handling:** Backend verifies signature, finds user, updates MongoDB subscription status
-10. **Success Redirect:** Frontend redirects to `/pricing/success` on payment completion
-11. **Status Persistence:** User's plan, subscription ID, and billing dates stored in MongoDB for future billing
+**Data Layer**
+- **MongoDB:** User data, repositories, chat history (tenant-filtered)
+- **Qdrant:** Vector embeddings in tenant-prefixed collections (hybrid search: dense + sparse)
+- **Clerk:** Organization and role management (JWT provider)
 
-**Key Features:**
-- Subscription-based pricing: Free (₹0), Pro (₹100/month), Team (₹250/month)
-- Idempotent payment handling: Gracefully handles duplicate webhooks and customer creation retries
-- JWT-based authentication for API calls (not cookies)
+### High-Level Request Flow
+
+```
+User Request (with Clerk JWT)
+    ↓
+Extract tenant scope (user_id or org_id, org_role)
+    ↓
+Auth Check: Verify ownership or org membership
+    ↓
+Query MongoDB & Qdrant with tenant filter
+    ↓
+Return tenant-scoped data only
+```
+
+### Feature Layers
+
+| Layer | Responsibility |
+|-------|-----------------|
+| **Ingestion** | Clone repo → parse files → generate embeddings → store in tenant collection |
+| **Chat** | Retrieve tenant-scoped chunks → send to Groq → return answer with sources |
+| **GitHub** | Per-user PAT storage; private repo authentication |
+| **Organizations** | Create orgs, invite members via Clerk, manage roles |
+| **Billing** | Razorpay subscriptions; Free/Pro/Team plan entitlements |
+
+### For Deeper Understanding
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed documentation on:
+- Authorization & ingestion flows
+- Chat & vector retrieval pipelines  
+- GitHub integration & token management
+- Organization & member lifecycle
+- Subscription & billing workflows
 
 ## API Endpoints
 
 ### Repository Management
 - `POST /api/ingest` - Ingest a new repository
-  - Body: `{ "repo_url": "https://github.com/user/repo" }`
+  - Body: `{ "repo_url": "https://github.com/user/repo", "org_id": "optional_org_id" }`
   - Returns: Ingestion status with file/chunk counts
+  - Scope: Personal workspace if org_id omitted; organization workspace if org_id provided
   - Auth: Required (Clerk)
 
-- `GET /api/repositories` - List all user's repositories
-  - Returns: Array of repositories with metadata (name, ingestion date, file count, chunk count, privacy status)
+- `GET /api/repositories` - List user's repositories
+  - Returns: Array of repositories scoped to active workspace (personal or org)
+  - Includes: name, ingestion date, file count, chunk count, privacy status, workspace scope
   - Auth: Required (Clerk)
 
 - `DELETE /api/repositories/{repo_id}` - Delete a repository
   - Returns: Success confirmation
-  - Auth: Required (Clerk)
+  - Auth: Required (Clerk; must have ownership/admin access)
 
-### Chat
+### Chat (Tenant-Aware)
 - `POST /api/chat` - Send a chat message
-  - Body: `{ "message": "string", "repository_name": "string" }`
+  - Body: `{ "message": "string", "repository_name": "string", "org_id": "optional" }`
   - Returns: AI response with sources
+  - Scope: Searches only within active workspace (personal or org)
   - Auth: Required (Clerk)
 
 - `GET /api/chat/history/{repository_name}` - Get chat history
-  - Returns: Last 10 conversations for the repository
+  - Query: `?org_id=optional_org_id`
+  - Returns: Last 10 conversations scoped to workspace
+  - Org members can view shared conversation history
   - Auth: Required (Clerk)
+
+### Organization Management
+- `POST /api/org/create` - Create a new organization
+  - Body: `{ "org_name": "string", "org_display_name": "string" }`
+  - Returns: Organization details and Clerk org_id
+  - Auth: Required (Clerk)
+
+- `GET /api/org/list` - List user's organizations
+  - Returns: All orgs user is member of with role (owner, admin, member)
+  - Auth: Required (Clerk)
+
+- `GET /api/org/{org_id}/members` - List organization members
+  - Returns: Array of members with email, role, and join date
+  - Auth: Required (Clerk; must be org member)
+
+- `POST /api/org/{org_id}/invite` - Send member invitation
+  - Body: `{ "email": "member@example.com" }`
+  - Returns: Invitation confirmation
+  - Auth: Required (Clerk; must be owner or admin)
+
+- `DELETE /api/org/{org_id}/member/{user_id}` - Remove member from organization
+  - Returns: Removal confirmation
+  - Auth: Required (Clerk; must be owner or admin)
+
+- `GET /api/org/{org_id}/quota` - Get organization usage quota
+  - Returns: `{ "month": "2026-03", "repos_ingested": 5, "limit": 20, "usage_percent": 25 }`
+  - Auth: Required (Clerk; must be org member)
 
 ### GitHub Integration
 - `POST /api/github/connect` - Store GitHub Personal Access Token
   - Body: `{ "github_token": "ghp_..." }`
   - Returns: Connection success
+  - Note: Token stored per-user, not shared across organization
   - Auth: Required (Clerk)
 
 - `POST /api/github/disconnect` - Remove GitHub connection
@@ -186,24 +283,25 @@ AI-powered codebase analysis platform. Chat with your GitHub repositories using 
   - Returns: `{ "connected": boolean, "has_token": boolean }`
   - Auth: Required (Clerk)
 
-### Health
+### Health & Status
 - `GET /health` - Health check endpoint
   - Returns: Service status
   - Auth: Not required
 
-### Payment
-- `POST /api/payments/create-subscription` - Create a subscription checkout
+### Payment & Billing
+- `POST /api/payments/create-subscription` - Create subscription
   - Body: `{ "plan": "pro" | "team" }`
-  - Returns: Razorpay subscription details with key and amount
+  - Returns: Razorpay subscription ID and checkout details
   - Auth: Required (Clerk)
 
-- `GET /api/payments/subscription-status` - Get current subscription status
+- `GET /api/payments/subscription-status` - Get subscription status
   - Returns: `{ "plan", "status", "current_period_end", "razorpay_subscription_id" }`
   - Auth: Required (Clerk)
 
-- `POST /api/payments/webhook` - Razorpay webhook for payment events
+- `POST /api/payments/webhook` - Razorpay webhook handler
   - Webhook events: `subscription.activated`, `subscription.halted`, `subscription.cancelled`, `payment.captured`, `payment.failed`
   - Auto-updates user subscription status in MongoDB
+  - Auth: Signature verification (not JWT)
 
 ## Project Structure
 
@@ -212,40 +310,55 @@ InfraLens/
 ├── app/
 │   ├── backend/
 │   │   ├── core/
-│   │   │   ├── auth.py              # Clerk authentication middleware
+│   │   │   ├── auth.py              # Clerk JWT auth with org context extraction
 │   │   │   ├── database.py          # MongoDB connection
 │   │   │   └── embeddings.py        # Embedding model creation
 │   │   ├── models/
 │   │   │   └── schemas.py           # Pydantic request/response models
 │   │   ├── services/
 │   │   │   ├── ingestion.py         # Repository cloning, parsing, embedding
-│   │   │   ├── chat_service.py      # LLM integration, vector retrieval
+│   │   │   ├── chat_service.py      # LLM integration, tenant-scoped retrieval
 │   │   │   ├── user_service.py      # User management, GitHub token handling
-│   │   │   └── payment_service.py   # Razorpay integration, subscriptions
+│   │   │   ├── org_service.py       # Organization management, member invitations
+│   │   │   ├── payment_service.py   # Razorpay integration, subscriptions
+│   │   │   └── entitlement_service.py # Plan-based feature gating
 │   │   ├── main.py                  # FastAPI app with all endpoints
 │   │   └── requirements.txt         # Python dependencies
 │   └── frontend/
 │       └── src/
 │           ├── components/
-│           │   └── GitHubTokenSetup.tsx  # GitHub OAuth token UI
+│           │   ├── OrgSwitcher.tsx       # Workspace switcher (Personal/Org)
+│           │   └── GitHubTokenSetup.tsx  # GitHub PAT UI
 │           ├── features/
 │           │   └── auth/pages/           # SignIn, SignUp pages
 │           ├── layouts/                  # App layout structure
 │           ├── pages/
-│           │   ├── LandingPage.tsx       # Public homepage
-│           │   ├── ChatPage.tsx          # Chat interface
+│           │   ├── ChatPage.tsx          # Multi-tenant chat interface
 │           │   ├── AddRepo.tsx           # Repository ingestion
-│           │   ├── ClonedRepos.tsx       # Repository list/management
-│           │   ├── PricingPage.tsx       # Pricing & subscription plans
-│           │   └── PricingSuccessPage.tsx # Payment success confirmation
-│           └── services/                 # API clients
-│               ├── chatService.ts        # Chat API integration
-│               └── paymentService.ts     # Razorpay payment integration
-├── docker-compose.yml                    # MongoDB + Qdrant setup
-└── agent/                                # Python virtual environment
+│           │   ├── ClonedRepos.tsx       # Repository list (org-scoped)
+│           │   ├── PricingPage.tsx       # Pricing & subscription
+│           │   ├── PricingSuccessPage.tsx # Payment success
+│           │   └── SettingsPage.tsx      # Team management & invitations
+│           └── services/
+│               ├── chatService.ts        # Chat API with tenant awareness
+│               ├── orgService.ts         # Organization API client
+│               └── paymentService.ts     # Razorpay integration
+├── docker-compose.yml               # MongoDB + Qdrant setup
+├── infra/                           # Terraform IaC (optional)
+└── agent/                           # Python virtual environment
 ```
 
 ## Setup
+
+### Prerequisites
+
+- Python 3.9+
+- Node.js 18+
+- Docker & Docker Compose
+- Groq API key (for LLM access)
+- Clerk account (for authentication and organization management)
+- GitHub Personal Access Token (optional, for private repositories)
+- Razorpay account (for payment processing)
 
 ### 1. Clone and Install
 
@@ -254,7 +367,18 @@ git clone https://github.com/kkshivani18/InfraLens
 cd InfraLens
 ```
 
-### 2. Start Infrastructure
+### 2. Configure Clerk for Organizations
+
+**Important:** InfraLens uses Clerk Organizations for multi-tenancy. Enable it in Clerk dashboard:
+
+1. Go to Clerk Dashboard → Settings → Organizations
+2. Enable "Organizations" feature
+3. Configure organization roles:
+   - `org:owner` - Full access (auto-assigned to creator)
+   - `org:admin` - Management permissions
+   - `org:member` - Standard access
+
+### 3. Start Infrastructure
 
 ```bash
 docker-compose up -d
@@ -262,7 +386,7 @@ docker-compose up -d
 
 This starts MongoDB (port 27017) and Qdrant (port 6333).
 
-### 3. Backend Setup
+### 4. Backend Setup
 
 ```bash
 cd app/backend
@@ -275,8 +399,15 @@ Create `.env`:
 ```env
 MONGODB_URL=mongodb://localhost:27017/<database-name>
 QDRANT_URL=http://localhost:6333
+QDRANT_API_KEY=your_qdrant_api_key
 CLERK_SECRET_KEY=your_clerk_secret_key
+CLERK_API_KEY=your_clerk_api_key
+CLERK_JWKS_URL=your_clerk_jwks_url
 GROQ_API_KEY=your_groq_api_key
+RAZORPAY_KEY_ID=your_razorpay_key_id
+RAZORPAY_KEY_SECRET=your_razorpay_secret_key
+RAZORPAY_PLAN_ID_PRO=pro_plan_id
+RAZORPAY_PLAN_ID_TEAM=team_plan_id
 ```
 
 Start backend:
@@ -284,7 +415,7 @@ Start backend:
 uvicorn main:app --reload --port 8000
 ```
 
-### 4. Frontend Setup
+### 5. Frontend Setup
 
 ```bash
 cd app/frontend
@@ -295,6 +426,7 @@ Create `.env`:
 ```env
 VITE_API_URL=http://localhost:8000/api
 VITE_CLERK_PUBLISHABLE_KEY=your_clerk_publishable_key
+VITE_RAZORPAY_KEY_ID=your_razorpay_key_id
 ```
 
 Start frontend:
@@ -302,13 +434,38 @@ Start frontend:
 npm run dev
 ```
 
-<!-- ## Known Issues
+### 6. Testing Multi-Tenant Features
 
-- Chat history loads but pagination not implemented (shows last 10 chats)
-- No progress indicator during repository ingestion
-- Error handling for network failures needs improvement 
-- Large codebases (>5000 files) may take significant time to ingest
-- Only English language support in LLM -->
+**Personal Workspace:** 
+- Sign in as any user
+- Add repositories—they'll be scoped to personal workspace
+- Chat with your repositories
+
+**Organization Workspace:**
+1. Sign in as User A
+2. Go to Settings → Create Organization
+3. Fill org details and confirm
+4. Go to Settings → Team Members → Invite
+5. Enter email of User B and send invite
+6. Sign in as User B
+7. Accept invitation from User A
+8. User B can now:
+   - Switch to org workspace (top-left switcher)
+   - View repos ingested by User A
+   - Chat with shared repositories
+   - See conversation history
+
+## Key Features Summary
+
+| Feature | Free Plan | Pro Plan | Team Plan |
+|---------|-----------|----------|-----------|
+| Personal Workspace | ✅ | ✅ | ✅ |
+| Organization Workspace | ❌ | ❌ | ✅ |
+| Monthly Repo Limit | 5 | 20 | 50 |
+| Team Members | N/A | N/A | 5 |
+| Private Repo Support | ✅ | ✅ | ✅ |
+| Chat History | ✅ | ✅ | ✅ |
+| Vector Search | ✅ | ✅ | ✅ |
 
 ## License
 
