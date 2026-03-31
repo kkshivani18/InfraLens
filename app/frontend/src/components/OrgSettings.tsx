@@ -2,13 +2,6 @@ import { useState, useEffect } from 'react';
 import { useAuth, useOrganization } from '@clerk/clerk-react';
 import { orgService } from '../services/api';
 
-interface OrgMember {
-  id: string;
-  name: string;
-  email: string;
-  role: 'admin' | 'member';
-}
-
 interface OrgDetailsType {
   org_id: string;
   name: string;
@@ -19,6 +12,13 @@ interface OrgDetailsType {
   ingestion_quota_monthly: number;
   repos_ingested_this_month: number;
   created_at: string;
+  members?: Array<{
+    user_id: string;
+    email?: string;
+    first_name?: string;
+    last_name?: string;
+    role: 'owner' | 'admin' | 'member';
+  }>;
 }
 
 export const OrgSettings = () => {
@@ -288,16 +288,34 @@ export const OrgSettings = () => {
 
           {/* Members List */}
           <div className="space-y-2">
-            <p className="text-sm text-gray-400 mb-3">Active Members</p>
-            <div className="bg-gray-900/50 rounded-lg p-3 text-sm text-gray-300">
-              <p>👤 Owner Account</p>
-              <p className="text-xs text-gray-500">ID: {orgDetails.owner_user_id}</p>
-            </div>
-            {orgDetails.member_count > 1 && (
-              <p className="text-xs text-gray-400 mt-2">
-                +{orgDetails.member_count - 1} team member{orgDetails.member_count - 1 !== 1 ? 's' : ''}
-              </p>
+            <p className="text-sm text-gray-400 mb-3">Members</p>
+
+            {/* Members */}
+            {orgDetails.members && orgDetails.members.length > 0 ? (
+              <>
+                {orgDetails.members.map((member) => (
+                  <div key={member.user_id} className="bg-gray-900/50 rounded-lg p-3 text-sm text-gray-300">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <p>👤 {member.first_name && member.last_name ? `${member.first_name} ${member.last_name}` : member.email || 'Team Member'}</p>
+                        {/* <p className="text-xs text-gray-500">ID: {member.user_id}</p> */}
+                        {member.email && (
+                          <p className="text-xs text-gray-500">{member.email}</p>
+                        )}
+                      </div>
+                      <span className="text-xs text-gray-400 capitalize">{member.role}</span>
+                    </div>
+                  </div>
+                ))}
+              </>
+            ) : (
+              <p className="text-xs text-gray-500 italic">No other members yet</p>
             )}
+
+            {/* Total Count */}
+            {/* <p className="text-xs text-gray-400 mt-4">
+              Total {orgDetails.member_count} member{orgDetails.member_count !== 1 ? 's' : ''} in organization
+            </p> */}
           </div>
         </div>
 

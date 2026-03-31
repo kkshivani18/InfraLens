@@ -302,11 +302,6 @@ Start frontend:
 npm run dev
 ```
 
-## To be Implemented
-
-- **API rate limiting** - No request throttling implemented
-- **Billing integration** - No usage tracking or payment system
-
 <!-- ## Known Issues
 
 - Chat history loads but pagination not implemented (shows last 10 chats)

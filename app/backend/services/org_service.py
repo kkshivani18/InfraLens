@@ -113,17 +113,29 @@ async def invite_member(org_id: str, email: str, ctx: Dict, db: Database) -> Dic
             raise Exception("CLERK_API_KEY not configured")
         
         async with httpx.AsyncClient() as client:
+            api_url = f"{CLERK_API_URL}/organizations/{org_id}/invitations"
+            
+            invitation_payload = {
+                "email_address": email,
+                "role": "org:member"  
+            }
+            
             response = await client.post(
-                f"{CLERK_API_URL}/organizations/{org_id}/invitations",
-                json={"email_address": email},
+                api_url,
+                json=invitation_payload,
                 headers={"Authorization": f"Bearer {CLERK_API_KEY}"}
             )
             
             if response.status_code not in [200, 201]:
-                error = response.json()
+                try:
+                    error = response.json()
+                    error_message = error.get('errors', [{}])[0].get('message', response.text)
+                except:
+                    error_message = response.text
+                
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Failed to send invitation: {error.get('errors', [{}])[0].get('message', 'Unknown error')}"
+                    detail=f"Failed to send invitation: {error_message}"
                 )
             
             invitation_data = response.json()
@@ -254,14 +266,14 @@ async def reset_org_quota_if_needed(org_id: str, db: Database) -> None:
 
 async def get_org_details(org_id: str, db: Database) -> Dict:
     """
-    Retrieve organization details with member count and quota info.
+    Retrieve organization details with member count, quota info, and member list.
     
     Args:
         org_id: Organization ID
         db: MongoDB connection
     
     Returns:
-        Organization details dictionary
+        Organization details dictionary with members list
     """
     org = await db.organizations.find_one({"org_id": org_id})
     if not org:
@@ -275,6 +287,28 @@ async def get_org_details(org_id: str, db: Database) -> Dict:
     usage = await db.usage.find_one({"org_id": org_id, "month": month_key})
     repos_ingested_this_month = usage.get("repos_ingested", 0) if usage else 0
     
+    members = []
+    if CLERK_API_KEY:
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"{CLERK_API_URL}/organizations/{org_id}/memberships",
+                    headers={"Authorization": f"Bearer {CLERK_API_KEY}"}
+                )
+                if response.status_code == 200:
+                    memberships = response.json()
+                    for membership in memberships.get("data", []):
+                        user_data = membership.get("public_user_data", {})
+                        members.append({
+                            "user_id": user_data.get("user_id"),
+                            "email": user_data.get("identifier"),
+                            "first_name": user_data.get("first_name"),
+                            "last_name": user_data.get("last_name"),
+                            "role": membership.get("role", "org:member").replace("org:", "")
+                        })
+        except Exception as e:
+            print(f"[OrgDetails] Warning: Could not fetch members from Clerk: {e}")
+    
     return {
         "org_id": org["org_id"],
         "name": org["name"],
@@ -284,7 +318,8 @@ async def get_org_details(org_id: str, db: Database) -> Dict:
         "seats_max": org.get("seats_max", 5),
         "ingestion_quota_monthly": org.get("ingestion_quota_monthly", 100),
         "repos_ingested_this_month": repos_ingested_this_month,
-        "created_at": org["created_at"].isoformat() if isinstance(org["created_at"], datetime) else org["created_at"]
+        "created_at": org["created_at"].isoformat() if isinstance(org["created_at"], datetime) else org["created_at"],
+        "members": members  
     }
 
 
@@ -355,12 +390,34 @@ async def ensure_org_exists_in_db(org_id: str, db: Database, ctx: Dict = None) -
     # Check if already in MongoDB
     org = await db.organizations.find_one({"org_id": org_id})
     if org:
+        print(f"[DEBUG] Organization {org_id} found in MongoDB")
         return org
     
     # Fetch from Clerk and sync
     try:
         if not CLERK_API_KEY:
-            raise Exception("CLERK_API_KEY not configured")
+            print(f"[WARN] CLERK_API_KEY not set - skipping Clerk sync for {org_id}")
+            # Check MongoDB one more time
+            org = await db.organizations.find_one({"org_id": org_id})
+            if org:
+                return org
+            # Create minimal org entry for now
+            new_org = {
+                "org_id": org_id,
+                "owner_user_id": ctx.get("user_id") if ctx else None,
+                "member_user_ids": [ctx.get("user_id")] if ctx else [],
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow(),
+                "name": f"Organization {org_id}",
+                "slug": org_id,
+                "image_url": None,
+                "max_members": 100,
+                "current_usage": 0,
+                "plan_type": "team",
+            }
+            await db.organizations.insert_one(new_org)
+            print(f"[DEBUG] Created placeholder org {org_id} in MongoDB")
+            return new_org
             
         async with httpx.AsyncClient() as client:
             response = await client.get(
@@ -370,11 +427,10 @@ async def ensure_org_exists_in_db(org_id: str, db: Database, ctx: Dict = None) -
             
             if response.status_code != 200:
                 # Log the error but don't fail completely - org might exist in MongoDB
-                print(f"⚠️  Failed to fetch org {org_id} from Clerk API: {response.status_code} - {response.text}")
+                print(f"[WARN] Failed to fetch org {org_id} from Clerk API: {response.status_code}")
                 # Check MongoDB one more time before failing
                 org = await db.organizations.find_one({"org_id": org_id})
                 if org:
-                    print(f"✅ Org {org_id} found in MongoDB, using existing record")
                     return org
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
@@ -390,6 +446,8 @@ async def ensure_org_exists_in_db(org_id: str, db: Database, ctx: Dict = None) -
         raise
     except Exception as e:
         print(f"❌ Error in ensure_org_exists_in_db: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to verify organization: {str(e)}"

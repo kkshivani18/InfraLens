@@ -98,12 +98,20 @@ async def get_user_repository(user_id: str, repo_name: str = None):
     
     return repo
 
-async def save_chat_to_mongodb(user_id: str, user_message: str, ai_response: str, repo_name: str = None):
-    """Save chat conversation to MongoDB"""
+async def save_chat_to_mongodb(user_id: str, user_message: str, ai_response: str, repo_name: str = None, org_id: str = None):
+    """Save chat conversation to MongoDB
+    
+    For org repos: uses org_id so all members see the same chat
+    For personal repos: uses user_id for isolation
+    """
     try:
         db = get_database()
+        
+        scope_id = org_id if org_id else user_id
+        scope_type = "org_id" if org_id else "user_id"
+        
         chat_doc = {
-            "user_id": user_id,
+            scope_type: scope_id, 
             "repository_name": repo_name,
             "messages": [
                 {"role": "user", "content": user_message, "timestamp": datetime.utcnow()},
@@ -113,12 +121,12 @@ async def save_chat_to_mongodb(user_id: str, user_message: str, ai_response: str
             "updated_at": datetime.utcnow()
         }
         await db.chats.insert_one(chat_doc)
-        print(f"Chat saved to MongoDB for user {user_id}")
+        print(f"Chat saved to MongoDB for {scope_type}={scope_id}, repo={repo_name}")
     except Exception as e:
         print(f"Failed to save chat to MongoDB: {e}")
 
-async def get_chat_response(user_query: str, user_id: str, repository_name: str = None):
-    print(f"Chat service: Processing query for user {user_id}")
+async def get_chat_response(user_query: str, user_id: str, repository_name: str = None, org_id: str = None):
+    print(f"Chat service: Processing query for user {user_id}, org {org_id}")
 
     repo = await get_user_repository(user_id, repository_name)
     
@@ -189,6 +197,6 @@ async def get_chat_response(user_query: str, user_id: str, repository_name: str 
     
     response = chain.invoke(user_query)
     
-    await save_chat_to_mongodb(user_id, user_query, response, repository_name)
+    await save_chat_to_mongodb(user_id, user_query, response, repository_name, org_id=org_id)
     
     return response

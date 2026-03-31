@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
-import { useAuth, useOrganization } from '@clerk/clerk-react';
+import { useAuth } from '@clerk/clerk-react';
 import { chatService } from '../services/api';
 import OrgSwitcher from '../components/OrgSwitcher';
 import { ShareChatModal } from '../components/ShareChatModal';
@@ -8,7 +8,6 @@ import { ShareChatModal } from '../components/ShareChatModal';
 const ChatPage = () => {
   const location = useLocation();
   const { getToken } = useAuth();
-  const { organization } = useOrganization();
   
   const [repoName, setRepoName] = useState<string | null>(null);
   const [messages, setMessages] = useState<{ role: string, text: string }[]>([]);
@@ -18,7 +17,7 @@ const ChatPage = () => {
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [activeOrgId, setActiveOrgId] = useState<string | null>(null);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
-  const [chatSessionId, setChatSessionId] = useState<string>(Math.random().toString(36).substring(7));
+  const [chatSessionId] = useState<string>(Math.random().toString(36).substring(7));
 
   useEffect(() => {
     const savedOrgId = localStorage.getItem('activeOrgId');
@@ -136,11 +135,8 @@ const ChatPage = () => {
           {repoName && activeOrgId && activeOrgId !== 'personal' && (
             <button
               onClick={() => setIsShareModalOpen(true)}
-              className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg text-sm font-medium text-white transition flex items-center gap-2"
+              className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg text-sm font-medium text-white transition"
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C9.839 10.323 12.84 8 16 8c3.623 0 6.885 2.104 8.236 5.186M8.684 13.342A9.978 9.978 0 0112 13c4.563 0 8.501 2.901 10.288 7M8.684 13.342A9.969 9.969 0 0112 3c4.563 0 8.501 2.901 10.288 7m0 0a9.967 9.967 0 01-4.288 2" />
-              </svg>
               Share Chat
             </button>
           )}

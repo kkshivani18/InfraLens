@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth, useOrganization } from '@clerk/clerk-react';
+import { useAuth } from '@clerk/clerk-react';
 import { ArrowRight, Trash2, ExternalLink, Clock } from 'lucide-react';
 import { repoService } from '../services/api';
 import OrgSwitcher from '../components/OrgSwitcher';
@@ -17,7 +17,6 @@ interface Repository {
 const ClonedReposPage = () => {
   const navigate = useNavigate();
   const { getToken } = useAuth();
-  const { organization } = useOrganization();
   const [repos, setRepos] = useState<Repository[]>([]);
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);

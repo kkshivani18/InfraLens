@@ -12,10 +12,14 @@ from services.payment_service import payment_service
 from services.entitlement_service import entitlement_checker
 from services.org_service import require_org_access, invite_member, get_org_details, ensure_org_exists_in_db
 from bson import ObjectId
+from datetime import datetime
 import traceback
 import json
+import httpx
+import os
 
 app = FastAPI(title="infralens backend")
+CLERK_API_KEY = os.getenv("CLERK_API_KEY")
 
 app.add_middleware(
     CORSMiddleware,
@@ -65,11 +69,57 @@ async def ingest_endpoint(request: IngestRequestWithOrg, current_user: dict = De
         
         if org_id:
             await ensure_org_exists_in_db(org_id, db, current_user)
+            
+            jwt_org_role = current_user.get("org_role")
+            has_org_access_from_jwt = (jwt_org_role in ["org:owner", "org:admin", "org:member"])
+            
             org = await db.organizations.find_one({"org_id": org_id})
             is_owner = org and org.get("owner_user_id") == user_id
-            is_member = org and user_id in org.get("member_user_ids", [])
-            if not org or (not is_owner and not is_member):
+            is_member_in_db = org and user_id in org.get("member_user_ids", [])            
+            has_access = is_owner or has_org_access_from_jwt or is_member_in_db
+            
+            if not has_access and not is_owner:
+                try:
+                    if CLERK_API_KEY:
+                        async with httpx.AsyncClient() as client:
+                            # Get org members from Clerk
+                            response = await client.get(
+                                f"https://api.clerk.com/v1/organizations/{org_id}/memberships",
+                                headers={"Authorization": f"Bearer {CLERK_API_KEY}"}
+                            )
+                            if response.status_code == 200:
+                                memberships = response.json()
+                                # check if user is a member in Clerk
+                                for membership in memberships.get("data", []):
+                                    member_user_id = membership.get("public_user_data", {}).get("user_id")
+                                    if member_user_id == user_id:
+                                        has_access = True
+                                        # sync to MongoDB
+                                        if org:
+                                            await db.organizations.update_one(
+                                                {"org_id": org_id},
+                                                {
+                                                    "$addToSet": {"member_user_ids": user_id},
+                                                    "$set": {"updated_at": datetime.utcnow()}
+                                                }
+                                            )
+                                        print(f"[Ingest] Synced {user_id} to org {org_id} (from Clerk memberships)")
+                                        break
+                except Exception as e:
+                    print(f"[Ingest] Warning: Could not verify Clerk membership: {e}")
+            
+            if not org or not has_access:
                 raise HTTPException(status_code=403, detail="You are not authorized to ingest repos for this organization")
+            
+            # sync JWT membership to MongoDB
+            if has_org_access_from_jwt and not is_member_in_db and not is_owner:
+                await db.organizations.update_one(
+                    {"org_id": org_id},
+                    {
+                        "$addToSet": {"member_user_ids": user_id},
+                        "$set": {"updated_at": datetime.utcnow()}
+                    }
+                )
             
             # Check org quota before ingestion
             month_key = datetime.utcnow().strftime("%Y-%m")
@@ -213,15 +263,64 @@ async def chat_endpoint(request: ChatRequest, current_user: dict = Depends(get_c
         if repo_org_id:
             await ensure_org_exists_in_db(repo_org_id, db, current_user)
             
+            jwt_org_role = current_user.get("org_role")
+            has_org_access_from_jwt = (jwt_org_role in ["org:owner", "org:admin", "org:member"])
+            
             org = await db.organizations.find_one({"org_id": repo_org_id})
             is_owner = org and org.get("owner_user_id") == user_id
-            is_member = org and user_id in org.get("member_user_ids", [])
-            if not org or (not is_owner and not is_member):
-                print(f"[Chat] ✗ Not org member")
+            is_member_in_db = org and user_id in org.get("member_user_ids", [])
+            has_access = is_owner or has_org_access_from_jwt or is_member_in_db
+            
+            if not has_access and not is_owner:
+                try:
+                    clerk_api_key = os.getenv("CLERK_API_KEY")
+                    if clerk_api_key:
+                        async with httpx.AsyncClient() as client:
+                            # Get org members from Clerk
+                            response = await client.get(
+                                f"https://api.clerk.com/v1/organizations/{repo_org_id}/memberships",
+                                headers={"Authorization": f"Bearer {clerk_api_key}"}
+                            )
+                            if response.status_code == 200:
+                                memberships = response.json()
+                                # check if user is a member in Clerk
+                                for membership in memberships.get("data", []):
+                                    member_user_id = membership.get("public_user_data", {}).get("user_id")
+                                    if member_user_id == user_id:
+                                        has_access = True
+                                        # sync to MongoDB
+                                        if org:
+                                            await db.organizations.update_one(
+                                                {"org_id": repo_org_id},
+                                                {
+                                                    "$addToSet": {"member_user_ids": user_id},
+                                                    "$set": {"updated_at": datetime.utcnow()}
+                                                }
+                                            )
+                                        print(f"[Chat] Synced {user_id} to org {repo_org_id} (from Clerk memberships)")
+                                        break
+                except Exception as e:
+                    print(f"[Chat] Warning: Could not verify Clerk membership: {e}")
+            
+            if not org or not has_access:
+                print(f"[Chat] ✗ Not org member (owner={is_owner}, jwt_role={jwt_org_role}, in_db={is_member_in_db})")
                 raise HTTPException(status_code=403, detail="You are not authorized to access this organization's repository")
+            
+            if has_org_access_from_jwt and not is_member_in_db and not is_owner:
+                await db.organizations.update_one(
+                    {"org_id": repo_org_id},
+                    {
+                        "$addToSet": {"member_user_ids": user_id},
+                        "$set": {"updated_at": datetime.utcnow()}
+                    }
+                )
+                print(f"[Chat] Synced {user_id} to org {repo_org_id} member list")
+            
             print(f"[Chat] ✓ Org repo access granted")
         
-        ai_response = await get_chat_response(user_msg, user_id, request.repository_name)
+        # chat shared across all org members, use org_id
+        chat_org_id = repo.get("org_id") if repo else None
+        ai_response = await get_chat_response(user_msg, user_id, request.repository_name, org_id=chat_org_id)
         return {"response": ai_response}
     except HTTPException:
         raise
@@ -256,15 +355,69 @@ async def get_repositories(workspace_type: str = "personal", org_id: str = None,
         elif workspace_type == "org":
             if not final_org_id:
                 raise HTTPException(status_code=400, detail="No organization selected")
+            print(f"        user_id={user_id}, org_id={final_org_id}")
             
             await ensure_org_exists_in_db(final_org_id, db, current_user)
             
             # validate user is org owner or member
+            jwt_org_role = current_user.get("org_role")
+            has_org_access_from_jwt = (jwt_org_role in ["org:owner", "org:admin", "org:member"])
+            
             org = await db.organizations.find_one({"org_id": final_org_id})
             is_owner = org and org.get("owner_user_id") == user_id
-            is_member = org and user_id in org.get("member_user_ids", [])
-            if not org or (not is_owner and not is_member):
+            is_member_in_db = org and user_id in org.get("member_user_ids", [])
+            has_access = is_owner or has_org_access_from_jwt or is_member_in_db
+            
+            if not has_access and not is_owner:
+                try:
+                    if CLERK_API_KEY:
+                        async with httpx.AsyncClient() as client:
+                            # Get org members from Clerk
+                            response = await client.get(
+                                f"https://api.clerk.com/v1/organizations/{final_org_id}/memberships",
+                                headers={"Authorization": f"Bearer {CLERK_API_KEY}"}
+                            )
+                            if response.status_code == 200:
+                                memberships = response.json()
+                                found = False
+                                for i, membership in enumerate(memberships.get("data", [])):
+                                    print(json.dumps(membership, indent=2, default=str))
+                                    
+                                    member_id = membership.get("public_user_data", {}).get("user_id")
+                                    role = membership.get("role")
+                                    
+                                    if member_id == user_id:
+                                        has_access = True
+                                        found = True
+                                        # Sync to MongoDB
+                                        if org:
+                                            await db.organizations.update_one(
+                                                {"org_id": final_org_id},
+                                                {
+                                                    "$addToSet": {"member_user_ids": user_id},
+                                                    "$set": {"updated_at": datetime.utcnow()}
+                                                }
+                                            )
+                                        print(f"[Auth] Synced {user_id} to org {final_org_id} (from Clerk memberships)")
+                                        break
+                    else:
+                        print(f"[ERROR] CLERK_API_KEY not set! Cannot verify membership via Clerk")
+                except Exception as e:
+                    print(f"[Auth] Warning: Could not verify Clerk membership: {e}")
+                    traceback.print_exc()
+            
+            if not org or not has_access:
                 raise HTTPException(status_code=403, detail="You are not authorized to access this organization")
+            
+            if (has_org_access_from_jwt or is_member_in_db) and not is_member_in_db and not is_owner:
+                await db.organizations.update_one(
+                    {"org_id": final_org_id},
+                    {
+                        "$addToSet": {"member_user_ids": user_id},
+                        "$set": {"updated_at": datetime.utcnow()}
+                    }
+                )
+                print(f"[Auth] Synced {user_id} to org {final_org_id} member list (from JWT org_role)")
             
             # Return ONLY org repos, never personal repos
             repositories = await db.repositories.find(
@@ -284,6 +437,7 @@ async def get_repositories(workspace_type: str = "personal", org_id: str = None,
         raise
     except Exception as e:
         print(f"Exception in get_repositories: {str(e)}")
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/chat/history/{repository_name}")
@@ -314,17 +468,74 @@ async def get_chat_history(repository_name: str, current_user: dict = Depends(ge
         if repo_org_id:
             await ensure_org_exists_in_db(repo_org_id, db, current_user)
             
+            jwt_org_role = current_user.get("org_role")
+            has_org_access_from_jwt = (jwt_org_role in ["org:owner", "org:admin", "org:member"])
+            
             org = await db.organizations.find_one({"org_id": repo_org_id})
             is_owner = org and org.get("owner_user_id") == user_id
-            is_member = org and user_id in org.get("member_user_ids", [])
-            if not org or (not is_owner and not is_member):
+            is_member_in_db = org and user_id in org.get("member_user_ids", [])
+            
+            has_access = is_owner or has_org_access_from_jwt or is_member_in_db
+            
+            if not has_access and not is_owner:
+                import httpx
+                import os
+                try:
+                    clerk_api_key = os.getenv("CLERK_API_KEY")
+                    if clerk_api_key:
+                        async with httpx.AsyncClient() as client:
+                            # Get org members from Clerk
+                            response = await client.get(
+                                f"https://api.clerk.com/v1/organizations/{repo_org_id}/memberships",
+                                headers={"Authorization": f"Bearer {clerk_api_key}"}
+                            )
+                            if response.status_code == 200:
+                                memberships = response.json()
+                                # Check if user is a member in Clerk
+                                for membership in memberships.get("data", []):
+                                    member_user_id = membership.get("public_user_data", {}).get("user_id")
+                                    if member_user_id == user_id:
+                                        # User is a member in Clerk, grant access
+                                        has_access = True
+                                        # Sync to MongoDB
+                                        if org:
+                                            await db.organizations.update_one(
+                                                {"org_id": repo_org_id},
+                                                {
+                                                    "$addToSet": {"member_user_ids": user_id},
+                                                    "$set": {"updated_at": datetime.utcnow()}
+                                                }
+                                            )
+                                        print(f"[ChatHistory] Synced {user_id} to org {repo_org_id} (from Clerk memberships)")
+                                        break
+                except Exception as e:
+                    print(f"[ChatHistory] Warning: Could not verify Clerk membership: {e}")
+            
+            if not org or not has_access:
                 raise HTTPException(status_code=403, detail="You are not authorized to access this organization's repository")
+            
+            if has_org_access_from_jwt and not is_member_in_db and not is_owner:
+                await db.organizations.update_one(
+                    {"org_id": repo_org_id},
+                    {
+                        "$addToSet": {"member_user_ids": user_id},
+                        "$set": {"updated_at": datetime.utcnow()}
+                    }
+                )
         
-        # Get chat history scoped to user + repository
-        chats = await db.chats.find({
-            "user_id": user_id,
-            "repository_name": repository_name
-        }).sort("created_at", -1).limit(10).to_list(length=10)
+        # For org repos, all members see the same chat history
+        if repo_org_id:
+            chats = await db.chats.find({
+                "org_id": repo_org_id,
+                "repository_name": repository_name
+            }).sort("created_at", -1).limit(10).to_list(length=10)
+            print(f"[ChatHistory] Retrieved chat history for org repo: org_id={repo_org_id}, repo={repository_name}")
+        else:
+            chats = await db.chats.find({
+                "user_id": user_id,
+                "repository_name": repository_name
+            }).sort("created_at", -1).limit(10).to_list(length=10)
+            print(f"[ChatHistory] Retrieved chat history for personal repo: user_id={user_id}, repo={repository_name}")
         
         # extract messages
         all_messages = []
@@ -420,10 +631,48 @@ async def delete_repository(repo_id: str, current_user: dict = Depends(get_curre
             
         # org repo access
         elif repo.get("org_id"):
+            jwt_org_role = current_user.get("org_role")
+            has_org_access_from_jwt = (jwt_org_role in ["org:owner", "org:admin", "org:member"])
+            
             org = await db.organizations.find_one({"org_id": repo["org_id"]})
             is_owner = org and org.get("owner_user_id") == user_id
-            is_member = org and user_id in org.get("member_user_ids", [])
-            if not org or (not is_owner and not is_member):
+            is_member_in_db = org and user_id in org.get("member_user_ids", [])
+            
+            has_access = is_owner or has_org_access_from_jwt or is_member_in_db
+            
+            if not has_access and not is_owner:
+                try:
+                    clerk_api_key = os.getenv("CLERK_API_KEY")
+                    if clerk_api_key:
+                        async with httpx.AsyncClient() as client:
+                            # Get org members from Clerk
+                            response = await client.get(
+                                f"https://api.clerk.com/v1/organizations/{repo['org_id']}/memberships",
+                                headers={"Authorization": f"Bearer {clerk_api_key}"}
+                            )
+                            if response.status_code == 200:
+                                memberships = response.json()
+                                # Check if user is a member in Clerk
+                                for membership in memberships.get("data", []):
+                                    member_user_id = membership.get("public_user_data", {}).get("user_id")
+                                    if member_user_id == user_id:
+                                        # User is a member in Clerk, grant access
+                                        has_access = True
+                                        # Sync to MongoDB
+                                        if org:
+                                            await db.organizations.update_one(
+                                                {"org_id": repo["org_id"]},
+                                                {
+                                                    "$addToSet": {"member_user_ids": user_id},
+                                                    "$set": {"updated_at": datetime.utcnow()}
+                                                }
+                                            )
+                                        print(f"[Delete] Synced {user_id} to org {repo['org_id']} (from Clerk memberships)")
+                                        break
+                except Exception as e:
+                    print(f"[Delete] Warning: Could not verify Clerk membership: {e}")
+            
+            if not org or not has_access:
                 raise HTTPException(status_code=403, detail="You do not have access to this organization's repository")
         else:
             raise HTTPException(status_code=404, detail="Repository not found")
@@ -554,11 +803,58 @@ async def share_chat(
             )
         
         # Validate org exists and user is member or owner
+        jwt_org_role = current_user.get("org_role")
+        has_org_access_from_jwt = (jwt_org_role in ["org:owner", "org:admin", "org:member"])
+        
         org = await db.organizations.find_one({"org_id": org_id})
         is_owner = org and org.get("owner_user_id") == user_id
-        is_member = org and user_id in org.get("member_user_ids", [])
-        if not org or (not is_owner and not is_member):
+        is_member_in_db = org and user_id in org.get("member_user_ids", [])
+        
+        has_access = is_owner or has_org_access_from_jwt or is_member_in_db
+        
+        if not has_access and not is_owner:
+            try:
+                clerk_api_key = os.getenv("CLERK_API_KEY")
+                if clerk_api_key:
+                    async with httpx.AsyncClient() as client:
+                        # Get org members from Clerk
+                        response = await client.get(
+                            f"https://api.clerk.com/v1/organizations/{org_id}/memberships",
+                            headers={"Authorization": f"Bearer {clerk_api_key}"}
+                        )
+                        if response.status_code == 200:
+                            memberships = response.json()
+                            # Check if user is a member in Clerk
+                            for membership in memberships.get("data", []):
+                                member_user_id = membership.get("public_user_data", {}).get("user_id")
+                                if member_user_id == user_id:
+                                    # User is a member in Clerk, grant access
+                                    has_access = True
+                                    # Sync to MongoDB
+                                    if org:
+                                        await db.organizations.update_one(
+                                            {"org_id": org_id},
+                                            {
+                                                "$addToSet": {"member_user_ids": user_id},
+                                                "$set": {"updated_at": datetime.utcnow()}
+                                            }
+                                        )
+                                    print(f"[Share] Synced {user_id} to org {org_id} (from Clerk memberships)")
+                                    break
+            except Exception as e:
+                print(f"[Share] Warning: Could not verify Clerk membership: {e}")
+        
+        if not org or not has_access:
             raise HTTPException(status_code=403, detail="You are not authorized to access this organization")
+        
+        if has_org_access_from_jwt and not is_member_in_db and not is_owner:
+            await db.organizations.update_one(
+                {"org_id": org_id},
+                {
+                    "$addToSet": {"member_user_ids": user_id},
+                    "$set": {"updated_at": datetime.utcnow()}
+                }
+            )
         
         # Validate repository exists and belongs to this org
         repo = await db.repositories.find_one(
