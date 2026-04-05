@@ -112,6 +112,8 @@ AI-powered codebase analysis platform with workspace-based team collaboration. C
 
 ### Organization Workspace (For Team Collaboration)
 
+![Data Modal](./images/data%20modal.png)
+
 #### Create an Organization
 1. Sign up/login via Clerk
 2. Navigate to Settings → Create Organization
@@ -158,6 +160,8 @@ AI-powered codebase analysis platform with workspace-based team collaboration. C
 ## Architecture
 
 InfraLens uses a **multi-tenant, workspace-based architecture** with complete data isolation between personal and organization workspaces.
+
+![InfraLens Architecture](./images/infralens%20architecture.jpg)
 
 ### Core Design
 
