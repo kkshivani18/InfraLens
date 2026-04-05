@@ -1,6 +1,8 @@
 ## InfraLens: The AI-Native Project Analysis Platform
 AI-powered codebase analysis platform with workspace-based team collaboration. Chat with your GitHub repositories using natural language — solo or with your team.
 
+![InfraLens Architecture](./images/infralens%20architecture.jpg)
+
 ## What It Does
 - Clone and analyze both **public and private** GitHub repositories with Personal Access Token integration
 - Index code using hybrid vector search (dense + sparse embeddings) with support for 15+ file types
